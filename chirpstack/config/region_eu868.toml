@@ -1,0 +1,16 @@
+[[regions]]
+  id="eu868"
+  description="EU868"
+  common_name="EU868"
+
+  [regions.gateway]
+    force_gws_private=false
+
+    [regions.gateway.backend]
+      enabled="mqtt"
+
+      [regions.gateway.backend.mqtt]
+        topic_prefix="eu868"
+        server="tcp://hivemq:1883"
+        qos=0
+        clean_session=false

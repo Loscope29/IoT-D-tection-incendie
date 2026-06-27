@@ -1,0 +1,113 @@
+:root {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  
+  /* Color Palette - Premium Dark Cyberpunk Theme */
+  --bg-main: #0a0b10;
+  --bg-card: rgba(18, 20, 32, 0.7);
+  --bg-card-hover: rgba(26, 29, 46, 0.85);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(168, 85, 247, 0.4);
+  
+  --text-primary: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  
+  --clr-primary: #a855f7; /* Purple */
+  --clr-success: #10b981; /* Emerald Green */
+  --clr-warning: #f59e0b; /* Amber Orange */
+  --clr-danger: #ef4444;  /* Red */
+  --clr-info: #3b82f6;    /* Blue */
+
+  --shadow-premium: 0 10px 30px -10px rgba(0, 0, 0, 0.7);
+  
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  overflow-x: hidden;
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(168, 85, 247, 0.15) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(59, 130, 246, 0.1) 0px, transparent 50%);
+  background-attachment: fixed;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--clr-primary);
+}
+
+/* Animations */
+@keyframes alert-pulse {
+  0%, 100% {
+    border-color: rgba(239, 68, 68, 0.4);
+    box-shadow: 0 0 15px -3px rgba(239, 68, 68, 0.2);
+  }
+  50% {
+    border-color: rgba(239, 68, 68, 1);
+    box-shadow: 0 0 25px 2px rgba(239, 68, 68, 0.5);
+    background-color: rgba(239, 68, 68, 0.08);
+  }
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+/* Custom Utilities */
+.alert-fire-active {
+  animation: alert-pulse 2s infinite ease-in-out;
+}
+
+.glow-danger {
+  color: var(--clr-danger);
+  text-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
+}
+
+.glow-success {
+  color: var(--clr-success);
+  text-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+}
+
+.indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.indicator-dot.active {
+  background-color: var(--clr-success);
+  box-shadow: 0 0 10px var(--clr-success);
+}
+
+.indicator-dot.inactive {
+  background-color: var(--clr-danger);
+  box-shadow: 0 0 10px var(--clr-danger);
+}

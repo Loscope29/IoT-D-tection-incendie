@@ -1,0 +1,31 @@
+[logging]
+  level="info"
+
+[postgresql]
+  dsn="postgres://chirpstack:chirpstack@postgresql:5432/chirpstack?sslmode=disable"
+  max_open_connections=10
+  min_idle_connections=0
+
+[redis]
+  servers=[
+    "redis://redis:6379/",
+  ]
+  tls_enabled=false
+
+[network]
+  net_id="000000"
+  enabled_regions=[
+    "eu868",
+  ]
+
+[api]
+  bind="0.0.0.0:8000"
+  secret="fire-detection-admin-token"
+
+[integration]
+  enabled=["mqtt"]
+
+  [integration.mqtt]
+    server="tcp://hivemq:1883"
+    event_topic_template="application/{{.ApplicationID}}/device/{{.DevEUI}}/event/{{.EventType}}"
+    command_topic_template="application/{{.ApplicationID}}/device/{{.DevEUI}}/command/{{.EventType}}"

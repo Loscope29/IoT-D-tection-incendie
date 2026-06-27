@@ -1,0 +1,82 @@
+<?xml version="1.0"?>
+<!--
+  HiveMQ CE — Configuration
+  Broker cloud exposé sur le port 1883
+
+  Clients autorisés :
+    - gateway Python      (publisher fire/+/+/+/+/# , subscriber fire/+/+/+/+/cmd/+)
+    - kafka producer      (subscriber fire/+/+/+/+/telemetry)
+    - fastapi commander   (publisher fire/+/+/+/+/cmd/+)
+    - dashboard           (subscriber via WebSocket port 8884)
+-->
+<hivemq>
+
+  <!-- Désactiver la télémétrie HiveMQ -->
+  <anonymous-usage-statistics>
+    <enabled>false</enabled>
+  </anonymous-usage-statistics>
+
+  <!-- Listener MQTT TCP -->
+  <listeners>
+    <tcp-listener>
+      <port>1883</port>
+      <bind-address>0.0.0.0</bind-address>
+      <name>tcp-listener</name>
+    </tcp-listener>
+
+    <!-- WebSocket pour le dashboard React -->
+    <websocket-listener>
+      <port>8000</port>
+      <bind-address>0.0.0.0</bind-address>
+      <name>websocket-listener</name>
+      <path>/mqtt</path>
+    </websocket-listener>
+  </listeners>
+
+  <!-- Sécurité : anonymous autorisé en dev -->
+  <!-- En production : remplacer par une extension d'authentification -->
+  <security>
+    <allow-empty-client-id>
+      <enabled>true</enabled>
+    </allow-empty-client-id>
+    <payload-format-validation>
+      <enabled>false</enabled>
+    </payload-format-validation>
+    <utf8-validation>
+      <enabled>false</enabled>
+    </utf8-validation>
+    <allow-request-problem-information>
+      <enabled>true</enabled>
+    </allow-request-problem-information>
+  </security>
+
+   <control-center>
+        <listeners>
+            <http>
+                <port>8080</port>
+                <bind-address>0.0.0.0</bind-address>
+            </http>
+        </listeners>
+        <users>
+            <user>
+                <name>admin</name>
+                <password>d82494f05d6917ba02f7aaa29689ccb444bb73f20380876cb05d1f37537b7892</password>
+            </user>
+        </users>
+    </control-center>
+  <!--
+    Structure des topics HiveMQ :
+
+    UPLINK (gateway → HiveMQ) :
+      fire/{site}/{batiment}/{salle}/{machine}/smoke
+      fire/{site}/{batiment}/{salle}/{machine}/battery
+      fire/{site}/{batiment}/{salle}/{machine}/status
+      fire/{site}/{batiment}/{salle}/{machine}/telemetry
+      fire/{site}/{batiment}/{salle}/{machine}/manual_trigger
+
+    DOWNLINK (FastAPI / consumer → HiveMQ → gateway) :
+      fire/{site}/{batiment}/{salle}/{machine}/cmd/siren
+      fire/{site}/{batiment}/{salle}/{machine}/cmd/light
+  -->
+
+</hivemq>

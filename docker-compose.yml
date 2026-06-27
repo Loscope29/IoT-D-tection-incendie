@@ -1,0 +1,213 @@
+services:
+  hivemq:
+    image: hivemq/hivemq4:latest
+    container_name: hivemq
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "8085:8080"
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"] 
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - ./hivemq/config/config.xml:/opt/hivemq/conf/config.xml
+    environment:
+      - HIVEMQ_USERNAME=admin
+      - HIVEMQ_PASSWORD=admin
+    networks:
+      - fire-net
+
+  postgresql:
+    image: postgres:14
+    container_name: postgresql
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chirpstack
+      POSTGRES_PASSWORD: chirpstack
+      POSTGRES_DB: chirpstack
+    volumes:
+      - postgresql-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chirpstack"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fire-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fire-net
+
+  chirpstack:
+    image: chirpstack/chirpstack:4
+    container_name: chirpstack
+    restart: unless-stopped
+    depends_on:                          # ✅ conditions de santé restaurées
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      hivemq:
+        condition: service_healthy
+    ports:
+      - "8095:8000"
+    volumes:
+      - ./chirpstack/config/chirpstack.toml:/etc/chirpstack/chirpstack.toml:ro
+      - ./chirpstack/config/region_eu868.toml:/etc/chirpstack/region_eu868.toml:ro
+    command: -c /etc/chirpstack
+    environment:
+    - MIGRATIONS_DIR=/usr/share/chirpstack/migrations
+    - POSTGRESQL__DSN=postgres://chirpstack:chirpstack@postgresql:5432/chirpstack?sslmode=disable
+    - 'REDIS__SERVERS=["redis://redis"]'
+    - NETWORK__NET_ID=000000
+    - NETWORK__ENABLED_REGIONS=eu868
+    - 'INTEGRATION__ENABLED=["mqtt"]'
+    - INTEGRATION__MQTT__SERVER=tcp://hivemq:1883
+    - INTEGRATION__MQTT__EVENT_TOPIC_TEMPLATE=application/{{.ApplicationID}}/device/{{.DevEUI}}/event/{{.EventType}}
+    - INTEGRATION__MQTT__COMMAND_TOPIC_TEMPLATE=application/{{.ApplicationID}}/device/{{.DevEUI}}/command/{{.EventType}}
+    - API__BIND=0.0.0.0:8000
+    - API__SECRET=fire-detection-admin-token
+    networks:
+      - fire-net
+
+  chirpstack-gateway-bridge:
+    image: chirpstack/chirpstack-gateway-bridge:4
+    container_name: chirpstack-gateway-bridge
+    restart: unless-stopped
+    depends_on:
+      hivemq:
+        condition: service_healthy
+    ports:
+    - "1700:1700/udp"
+    volumes:
+    - ./chirpstack/config/chirpstack-gateway-bridge.toml:/etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml:ro
+    command: -c /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml
+    networks:
+    - fire-net
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: "2181"
+      ZOOKEEPER_TICK_TIME: "2000"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    networks:
+      - fire-net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: "1"
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - fire-net
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    restart: unless-stopped
+    depends_on:
+      - kafka
+    ports:
+      - "8090:8080"
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=fire-cluster
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+      - KAFKA_CLUSTERS_0_ZOOKEEPER=zookeeper:2181
+    networks:
+      - fire-net
+
+  flink-jobmanager:
+    image: flink:1.18-scala_2.12
+    container_name: flink-jobmanager
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        state.backend: filesystem
+        state.checkpoints.dir: file:///tmp/flink/checkpoints
+    networks:
+      - fire-net
+
+  flink-taskmanager:
+    image: flink:1.18-scala_2.12
+    container_name: flink-taskmanager
+    restart: unless-stopped
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+    networks:
+      - fire-net
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=adminpassword
+      - DOCKER_INFLUXDB_INIT_ORG=fire-detection
+      - DOCKER_INFLUXDB_INIT_BUCKET=fire-detection-data
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=fire-detection-admin-token
+      - DOCKER_INFLUXDB_INIT_RETENTION=30d
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    networks:
+      - fire-net
+
+volumes:
+  postgresql-data:
+  redis-data:
+  influxdb-data:
+  influxdb-config:
+  kafka-data:
+  zookeeper-data:
+  zookeeper-log:
+
+networks:
+  fire-net:
+    driver: bridge
