@@ -394,25 +394,66 @@ function App() {
           </div>
         </section>
 
-        {/* BAS DROITE : Terminal de Flux d'Événements */}
+        {/* BAS DROITE : Synoptique Graphique des Équipements */}
         <section className="quadrant-card">
           <div className="card-header">
             <div className="card-title-container">
-              <Terminal size={18} className="glow-success" />
-              <h2 className="card-title">Flux d'Événements Temps Réel</h2>
+              <Activity size={18} className="glow-success" />
+              <h2 className="card-title">Synoptique Graphique des Équipements</h2>
             </div>
-            <span className="badge-count">Live</span>
+            <span className="badge-count" style={{ background: 'var(--clr-success)' }}>Interactif</span>
           </div>
-          <div className="card-content" style={{ display: 'flex', flexDirection: 'column' }}>
-            <div className="event-log-container">
-              <div className="terminal-window">
-                {logs.map((log, idx) => (
-                  <div key={idx} className={`log-entry log-${log.type}`}>
-                    <span className="log-time">[{log.time}]</span>
-                    <span className="log-msg">{log.msg}</span>
+          <div className="card-content">
+            <div className="synoptic-grid">
+              {Object.values(sensors).map(sensor => {
+                const { site, batiment, salle } = sensor.location;
+                const { smoke_level, temperature, siren, light, status } = sensor.readings;
+                const isFire = smoke_level >= 50.0 || temperature >= 60.0;
+                const isOffline = status === "inactive" || status === "connecting";
+                
+                return (
+                  <div key={sensor.dev_eui} className={`synoptic-room-card ${isFire ? 'fire-alarm-active' : ''} ${isOffline ? 'room-offline' : ''}`}>
+                    <div className="room-header">
+                      <span className="room-title">{site.toUpperCase()} — {batiment.replace('batiment_', 'Bât. ')} ({salle.replace('salle_', 'S.')})</span>
+                      <span className={`status-dot ${isOffline ? 'offline' : (isFire ? 'danger' : 'success')}`}></span>
+                    </div>
+
+                    <div className="room-layout">
+                      {/* Capteur */}
+                      <div className="equipment-node">
+                        <div className={`equipment-icon ${isOffline ? 'bg-dark' : (isFire ? 'bg-danger text-light' : 'bg-success text-light')}`}>
+                          <Flame size={16} className={isFire ? 'animate-pulse' : ''} />
+                        </div>
+                        <span className="equipment-label">Capteur</span>
+                        <span className="equipment-value">{isOffline ? 'N/A' : `${smoke_level} ppm`}</span>
+                        <span className="equipment-value">{isOffline ? '' : `${temperature} °C`}</span>
+                      </div>
+
+                      {/* Sirène */}
+                      <div className="equipment-node">
+                        <div className={`equipment-icon ${isOffline ? 'bg-dark' : (siren === 'ON' ? 'siren-active' : 'bg-dark text-muted')}`}>
+                          <Volume2 size={16} />
+                        </div>
+                        <span className="equipment-label">Sirène</span>
+                        <span className="equipment-value" style={{ color: siren === 'ON' ? 'var(--clr-danger)' : 'var(--text-secondary)' }}>
+                          {isOffline ? 'N/A' : siren}
+                        </span>
+                      </div>
+
+                      {/* Gyrophare */}
+                      <div className="equipment-node">
+                        <div className={`equipment-icon ${isOffline ? 'bg-dark' : (light === 'ON' ? 'light-active' : 'bg-dark text-muted')}`}>
+                          <Lightbulb size={16} />
+                        </div>
+                        <span className="equipment-label">Gyrophare</span>
+                        <span className="equipment-value" style={{ color: light === 'ON' ? 'var(--clr-warning)' : 'var(--text-secondary)' }}>
+                          {isOffline ? 'N/A' : light}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
           </div>
         </section>
