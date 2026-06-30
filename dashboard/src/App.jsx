@@ -198,7 +198,7 @@ function App() {
             <Flame size={22} className={fireAlerts.length > 0 ? 'animate-pulse' : ''} />
           </div>
           <div className="summary-info">
-            <span className="summary-value">{fireAlerts.length}</span>
+            <span className="summary-value font-mono">{fireAlerts.length}</span>
             <span className="summary-label">Alertes Incendie</span>
           </div>
         </div>
@@ -208,7 +208,7 @@ function App() {
             <Wrench size={22} />
           </div>
           <div className="summary-info">
-            <span className="summary-value">{technicalAlerts.length}</span>
+            <span className="summary-value font-mono">{technicalAlerts.length}</span>
             <span className="summary-label">Alertes Tech</span>
           </div>
         </div>
@@ -218,7 +218,7 @@ function App() {
             <Volume2 size={22} className={activeSirensCount > 0 ? 'glow-danger animate-pulse' : ''} />
           </div>
           <div className="summary-info">
-            <span className="summary-value">{activeSirensCount} / 4</span>
+            <span className="summary-value font-mono">{activeSirensCount} / 4</span>
             <span className="summary-label">Sirènes Actives</span>
           </div>
         </div>
@@ -228,7 +228,7 @@ function App() {
             <Lightbulb size={22} className={activeLightsCount > 0 ? 'glow-success animate-pulse' : ''} />
           </div>
           <div className="summary-info">
-            <span className="summary-value">{activeLightsCount} / 4</span>
+            <span className="summary-value font-mono">{activeLightsCount} / 4</span>
             <span className="summary-label">Gyrophares Actifs</span>
           </div>
         </div>
@@ -263,11 +263,11 @@ function App() {
                     <div key={sensor.dev_eui} className="alert-item danger alert-fire-active">
                       <div className="alert-info">
                         <span className="alert-location">{site.toUpperCase()} — {batiment} ({salle})</span>
-                        <span className="alert-details">ID: {machine} | Ref: {sensor.dev_eui.slice(-4)}</span>
+                        <span className="alert-details">ID: {machine} | Ref: <span className="font-mono">{sensor.dev_eui.slice(-4)}</span></span>
                       </div>
                       <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <span className="alert-badge danger">{smoke_level} ppm</span>
-                        <span className="alert-badge danger">{temperature} °C</span>
+                        <span className="alert-badge danger font-mono">{smoke_level} ppm</span>
+                        <span className="alert-badge danger font-mono">{temperature} °C</span>
                       </div>
                     </div>
                   );
@@ -294,11 +294,11 @@ function App() {
                 const isOffline = status === "inactive" || status === "connecting";
                 
                 return (
-                  <div key={sensor.dev_eui} className="sensor-control-card">
+                  <div key={sensor.dev_eui} className={`sensor-control-card ${isOffline ? 'sensor-offline' : ''}`}>
                     <div className="sensor-control-header">
                       <div>
                         <span className="sensor-name">{site.toUpperCase()} — {batiment} ({salle})</span>
-                        <div className="sensor-eui">EUI: {sensor.dev_eui}</div>
+                        <div className="sensor-eui font-mono">EUI: {sensor.dev_eui}</div>
                       </div>
                       <span className={`indicator-dot ${isOffline ? 'inactive' : 'active'}`}></span>
                     </div>
@@ -381,12 +381,12 @@ function App() {
                     <div key={sensor.dev_eui} className="alert-item warning">
                       <div className="alert-info">
                         <span className="alert-location">{site.toUpperCase()} — {batiment} ({salle})</span>
-                        <span className="alert-details">ID: {machine} | Ref: {sensor.dev_eui.slice(-4)}</span>
+                        <span className="alert-details">ID: {machine} | Ref: <span className="font-mono">{sensor.dev_eui.slice(-4)}</span></span>
                       </div>
                       <div>
                         {isLowBattery && (
                           <span className="alert-badge warning" style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
-                            <Battery size={12} /> Batterie : {battery_level}%
+                            <Battery size={12} /> Batterie : <span className="font-mono">{battery_level}%</span>
                           </span>
                         )}
                         {isOffline && (
@@ -434,8 +434,8 @@ function App() {
                           <Flame size={16} className={isFire ? 'animate-pulse' : ''} />
                         </div>
                         <span className="equipment-label">Capteur</span>
-                        <span className="equipment-value">{isOffline ? 'N/A' : `${smoke_level} ppm`}</span>
-                        <span className="equipment-value">{isOffline ? '' : `${temperature} °C`}</span>
+                        <span className="equipment-value font-mono">{isOffline ? 'N/A' : `${smoke_level} ppm`}</span>
+                        <span className="equipment-value font-mono">{isOffline ? '' : `${temperature} °C`}</span>
                       </div>
 
                       {/* Sirène */}
@@ -444,7 +444,7 @@ function App() {
                           <Volume2 size={16} />
                         </div>
                         <span className="equipment-label">Sirène</span>
-                        <span className="equipment-value" style={{ color: siren === 'ON' ? 'var(--clr-danger)' : 'var(--text-secondary)' }}>
+                        <span className="equipment-value font-mono" style={{ color: siren === 'ON' ? 'var(--clr-danger)' : 'var(--text-secondary)' }}>
                           {isOffline ? 'N/A' : siren}
                         </span>
                       </div>
@@ -455,7 +455,7 @@ function App() {
                           <Lightbulb size={16} />
                         </div>
                         <span className="equipment-label">Gyrophare</span>
-                        <span className="equipment-value" style={{ color: light === 'ON' ? 'var(--clr-warning)' : 'var(--text-secondary)' }}>
+                        <span className="equipment-value font-mono" style={{ color: light === 'ON' ? 'var(--clr-warning)' : 'var(--text-secondary)' }}>
                           {isOffline ? 'N/A' : light}
                         </span>
                       </div>

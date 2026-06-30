@@ -233,6 +233,17 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sensor-control-card:hover:not(.sensor-offline) {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.sensor-control-card.sensor-offline {
+  opacity: 0.55;
+  background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255, 255, 255, 0.005) 10px, rgba(255, 255, 255, 0.005) 20px);
 }
 
 .sensor-control-header {
@@ -302,24 +313,35 @@
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
-  padding: 0.35rem 0.75rem;
+  padding: 0.35rem 0.85rem;
   border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
 }
 
-.control-btn:hover {
+.control-btn:hover:not(:disabled) {
   background: var(--clr-primary);
   border-color: var(--clr-primary);
-  color: #fff;
-  box-shadow: 0 0 10px rgba(168, 85, 247, 0.4);
+  color: #0f172a;
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.4);
+}
+
+.control-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.control-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .control-btn.btn-active {
-  background: rgba(168, 85, 247, 0.2);
+  background: rgba(34, 197, 94, 0.15);
   border-color: var(--clr-primary);
+  color: var(--clr-primary);
 }
 
 /* Event Logs (Bottom Right) */
@@ -479,7 +501,9 @@
 }
 
 .synoptic-room-card.room-offline {
-  opacity: 0.45;
+  opacity: 0.55;
+  background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255, 255, 255, 0.005) 10px, rgba(255, 255, 255, 0.005) 20px);
+  border-color: rgba(71, 85, 105, 0.2);
 }
 
 .room-header {
