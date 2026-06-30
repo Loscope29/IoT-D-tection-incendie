@@ -17,8 +17,34 @@ logging.basicConfig(
 
 log = logging.getLogger("sensor")
 
-CHIRPSTACK_HOST = "localhost"
-CHIRPSTACK_PORT = 1883
+import os
+
+def load_env(file_path=".env"):
+    current_dir = os.path.abspath(os.path.dirname(__file__)) if '__file__' in globals() else os.getcwd()
+    while current_dir:
+        env_path = os.path.join(current_dir, file_path)
+        if os.path.exists(env_path):
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        if '=' in line:
+                            key, val = line.split('=', 1)
+                            os.environ[key.strip()] = val.strip()
+            return True
+        parent_dir = os.path.dirname(current_dir)
+        if parent_dir == current_dir:
+            break
+        current_dir = parent_dir
+    return False
+
+# Chargement du fichier .env
+load_env()
+
+CHIRPSTACK_HOST = os.environ.get("VITE_HIVEMQ_HOST", "localhost")
+CHIRPSTACK_PORT = int(os.environ.get("VITE_HIVEMQ_PORT", 1883))
+HIVEMQ_USER = os.environ.get("VITE_HIVEMQ_USER")
+HIVEMQ_PASSWORD = os.environ.get("VITE_HIVEMQ_PASSWORD")
 APPLICATION_ID = "fire-detection-app"
 
 
@@ -60,6 +86,10 @@ class FireSensor:
         self.low_battery_triggered = False
         self.frame_counter = 0
         self._client = mqtt.Client(client_id=f"sensor-{self.dev_eui}")
+        if HIVEMQ_USER and HIVEMQ_PASSWORD:
+            self._client.username_pw_set(HIVEMQ_USER, HIVEMQ_PASSWORD)
+        if CHIRPSTACK_PORT == 8883 or not ("localhost" in CHIRPSTACK_HOST or "127.0.0.1" in CHIRPSTACK_HOST):
+            self._client.tls_set()
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message

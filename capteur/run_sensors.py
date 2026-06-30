@@ -80,13 +80,20 @@ def apply_scenario(sensors: list[FireSensor], scenario: str):
         sensors[3].fire_triggered = True
         log.warning("SCÉNARIO : incidents multiples")
 
+    elif scenario == "apocalypse":
+        log.warning("SCÉNARIO : APOCALYPSE - PIRE CAS POSSIBLE SUR TOUS LES CAPTEURS")
+        for s in sensors:
+            s.fire_triggered = True
+            s.low_battery_triggered = True
+            s.state.status = "inactive"
+
 
 
 def main():
     parser = argparse.ArgumentParser(description="Lance le parc de capteurs simulés")
     parser.add_argument(
         "--scenario",
-        choices=["incendie", "batterie", "inactif", "multi"],
+        choices=["incendie", "batterie", "inactif", "multi", "apocalypse"],
         default=None,
         help="Scénario à simuler"
     )

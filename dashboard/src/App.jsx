@@ -50,15 +50,24 @@ function App() {
 
   useEffect(() => {
     // Connexion au broker MQTT HiveMQ via WebSockets
-    // Port 8000, chemin /mqtt exposé sur l'hôte
-    const brokerUrl = 'ws://localhost:8000/mqtt';
-    logMessage("Connexion au broker HiveMQ (WebSockets)...", "system");
+    const host = import.meta.env.VITE_HIVEMQ_HOST || 'localhost';
+    const wsPort = import.meta.env.VITE_HIVEMQ_WS_PORT || '8000';
+    const username = import.meta.env.VITE_HIVEMQ_USER;
+    const password = import.meta.env.VITE_HIVEMQ_PASSWORD;
+
+    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+    const protocol = isLocal ? 'ws://' : 'wss://';
+    const brokerUrl = `${protocol}${host}:${wsPort}/mqtt`;
+
+    logMessage(`Connexion au broker HiveMQ (${protocol.replace('://', '').toUpperCase()})...`, "system");
 
     const client = mqtt.connect(brokerUrl, {
       clientId: `react-dashboard-${Math.random().toString(16).substr(2, 8)}`,
       clean: true,
       connectTimeout: 4000,
       reconnectPeriod: 4000,
+      username: username || undefined,
+      password: password || undefined
     });
 
     mqttClientRef.current = client;

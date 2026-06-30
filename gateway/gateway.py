@@ -22,10 +22,34 @@ logging.basicConfig(
 log = logging.getLogger("gateway")
 
 # ─── Configuration ─────────────────────────────────────────────────────────
-HIVEMQ_HOST  = "localhost"
-HIVEMQ_PORT  = 1883
-HIVEMQ_USER  = ""
-HIVEMQ_PASS  = ""
+import os
+
+def load_env(file_path=".env"):
+    current_dir = os.path.abspath(os.path.dirname(__file__)) if '__file__' in globals() else os.getcwd()
+    while current_dir:
+        env_path = os.path.join(current_dir, file_path)
+        if os.path.exists(env_path):
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        if '=' in line:
+                            key, val = line.split('=', 1)
+                            os.environ[key.strip()] = val.strip()
+            return True
+        parent_dir = os.path.dirname(current_dir)
+        if parent_dir == current_dir:
+            break
+        current_dir = parent_dir
+    return False
+
+# Chargement du fichier .env
+load_env()
+
+HIVEMQ_HOST  = os.environ.get("VITE_HIVEMQ_HOST", "localhost")
+HIVEMQ_PORT  = int(os.environ.get("VITE_HIVEMQ_PORT", 1883))
+HIVEMQ_USER  = os.environ.get("VITE_HIVEMQ_USER")
+HIVEMQ_PASS  = os.environ.get("VITE_HIVEMQ_PASSWORD")
 APP_ID       = "fire-detection-app"
 
 # Topics souscrits
@@ -92,12 +116,13 @@ class FireGateway:
 
         # Un seul client MQTT sur HiveMQ
         self._client = mqtt.Client(client_id="fire-gateway")
+        if HIVEMQ_USER and HIVEMQ_PASS:
+            self._client.username_pw_set(HIVEMQ_USER, HIVEMQ_PASS)
+        if HIVEMQ_PORT == 8883 or not ("localhost" in HIVEMQ_HOST or "127.0.0.1" in HIVEMQ_HOST):
+            self._client.tls_set()
         self._client.on_connect    = self._on_connect
         self._client.on_message    = self._on_message
         self._client.on_disconnect = self._on_disconnect
-
-        if HIVEMQ_USER:
-            self._client.username_pw_set(HIVEMQ_USER, HIVEMQ_PASS)
 
     # ── Callbacks MQTT ─────────────────────────────────────────────────────
     def _on_connect(self, client, userdata, flags, rc):

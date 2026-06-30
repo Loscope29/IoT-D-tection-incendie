@@ -21,8 +21,34 @@ logging.basicConfig(
 log = logging.getLogger("mqtt_to_kafka")
 
 # Configuration des brokers
-MQTT_HOST = "localhost"
-MQTT_PORT = 1883
+import os
+
+def load_env(file_path=".env"):
+    current_dir = os.path.abspath(os.path.dirname(__file__)) if '__file__' in globals() else os.getcwd()
+    while current_dir:
+        env_path = os.path.join(current_dir, file_path)
+        if os.path.exists(env_path):
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        if '=' in line:
+                            key, val = line.split('=', 1)
+                            os.environ[key.strip()] = val.strip()
+            return True
+        parent_dir = os.path.dirname(current_dir)
+        if parent_dir == current_dir:
+            break
+        current_dir = parent_dir
+    return False
+
+# Chargement du fichier .env
+load_env()
+
+MQTT_HOST = os.environ.get("VITE_HIVEMQ_HOST", "localhost")
+MQTT_PORT = int(os.environ.get("VITE_HIVEMQ_PORT", 1883))
+MQTT_USER = os.environ.get("VITE_HIVEMQ_USER")
+MQTT_PASS = os.environ.get("VITE_HIVEMQ_PASSWORD")
 MQTT_TOPIC_SUB = "fire/#"
 
 KAFKA_BOOTSTRAP_SERVERS = ["localhost:29092"]
@@ -115,6 +141,10 @@ def on_message(client, userdata, msg):
 
 # Initialisation du client MQTT
 mqtt_client = mqtt.Client(client_id="hivemq-to-kafka-bridge")
+if MQTT_USER and MQTT_PASS:
+    mqtt_client.username_pw_set(MQTT_USER, MQTT_PASS)
+if MQTT_PORT == 8883 or not ("localhost" in MQTT_HOST or "127.0.0.1" in MQTT_HOST):
+    mqtt_client.tls_set()
 mqtt_client.on_connect = on_connect
 mqtt_client.on_disconnect = on_disconnect
 mqtt_client.on_message = on_message

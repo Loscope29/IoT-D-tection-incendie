@@ -8,6 +8,7 @@ import json
 import logging
 import time
 import sys
+import os
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
 import paho.mqtt.client as mqtt
@@ -21,8 +22,32 @@ logging.basicConfig(
 log = logging.getLogger("mqtt_to_kafka")
 
 # Configuration des brokers
-MQTT_HOST = "localhost"
-MQTT_PORT = 1883
+def load_env(file_path=".env"):
+    current_dir = os.path.abspath(os.path.dirname(__file__)) if '__file__' in globals() else os.getcwd()
+    while current_dir:
+        env_path = os.path.join(current_dir, file_path)
+        if os.path.exists(env_path):
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        if '=' in line:
+                            key, val = line.split('=', 1)
+                            os.environ[key.strip()] = val.strip()
+            return True
+        parent_dir = os.path.dirname(current_dir)
+        if parent_dir == current_dir:
+            break
+        current_dir = parent_dir
+    return False
+
+# Chargement du fichier .env
+load_env()
+
+MQTT_HOST = os.environ.get("VITE_HIVEMQ_HOST", "localhost")
+MQTT_PORT = int(os.environ.get("VITE_HIVEMQ_PORT", 1883))
+MQTT_USER = os.environ.get("VITE_HIVEMQ_USER")
+MQTT_PASS = os.environ.get("VITE_HIVEMQ_PASSWORD")
 MQTT_TOPIC_SUB = "fire/#"
 
 KAFKA_BOOTSTRAP_SERVERS = ["localhost:29092"]
@@ -69,7 +94,6 @@ def on_message(client, userdata, msg):
     # Extraction des infos du topic : fire/{site}/{batiment}/{salle}/{machine}/{type}
     parts = topic.split("/")
     if len(parts) < 6:
-        # Format invalide ou différent
         return
         
     data_type = parts[-1]
@@ -78,7 +102,6 @@ def on_message(client, userdata, msg):
     salle = parts[3]
     machine = parts[4]
 
-    # Essayer de parser le payload en JSON, sinon le garder brut
     try:
         val = json.loads(raw_payload)
     except json.JSONDecodeError:
@@ -99,20 +122,17 @@ def on_message(client, userdata, msg):
     }
 
     # Choix du topic Kafka de destination selon le type de donnée
-    # Par exemple, on sépare la télémétrie complète et les alertes (smoke)
     if data_type == "telemetry":
         kafka_topic = "fire-telemetry"
-    elif data_type == "smoke":
+    elif data_type in ("smoke", "smoke_level", "temperature"):
         kafka_topic = "fire-alerts"
-    elif data_type in ("battery", "status"):
+    elif data_type in ("battery", "battery_level", "status"):
         kafka_topic = "fire-diagnostics"
     else:
         kafka_topic = "fire-others"
 
     try:
-        # Envoi asynchrone vers Kafka
         future = producer.send(kafka_topic, kafka_payload)
-        # Optionnel : attendre la confirmation de réception
         record_metadata = future.get(timeout=2)
         log.info(f"[{data_type}] {site}/{batiment}/{salle}/{machine} -> Kafka topic '{kafka_topic}' (offset {record_metadata.offset})")
     except Exception as e:
@@ -120,6 +140,10 @@ def on_message(client, userdata, msg):
 
 # Initialisation du client MQTT
 mqtt_client = mqtt.Client(client_id="hivemq-to-kafka-bridge")
+if MQTT_USER and MQTT_PASS:
+    mqtt_client.username_pw_set(MQTT_USER, MQTT_PASS)
+if MQTT_PORT == 8883 or not ("localhost" in MQTT_HOST or "127.0.0.1" in MQTT_HOST):
+    mqtt_client.tls_set()
 mqtt_client.on_connect = on_connect
 mqtt_client.on_disconnect = on_disconnect
 mqtt_client.on_message = on_message
@@ -127,8 +151,6 @@ mqtt_client.on_message = on_message
 try:
     log.info(f"Connexion à HiveMQ...")
     mqtt_client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
-    
-    # Lancement de la boucle infinie d'écoute
     mqtt_client.loop_forever()
 except KeyboardInterrupt:
     log.info("Arrêt du pont MQTT -> Kafka demandé.")
