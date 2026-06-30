@@ -295,6 +295,12 @@ function App() {
                 
                 return (
                   <div key={sensor.dev_eui} className={`sensor-control-card ${isOffline ? 'sensor-offline' : ''}`}>
+                    {/* Industrial Rack Mount Screws */}
+                    <div className="rack-screw top-left"></div>
+                    <div className="rack-screw top-right"></div>
+                    <div className="rack-screw bottom-left"></div>
+                    <div className="rack-screw bottom-right"></div>
+
                     <div className="sensor-control-header">
                       <div>
                         <span className="sensor-name">{site.toUpperCase()} — {batiment} ({salle})</span>
@@ -306,6 +312,7 @@ function App() {
                     <div className="controls-row">
                       {/* Sirène */}
                       <div className="actuator-status-container">
+                        <span className={`led-bulb ${isOffline ? 'offline' : (siren === 'ON' ? 'active-danger' : 'inactive')}`}></span>
                         <span className="actuator-label">
                           <Volume2 size={14} /> Sirène
                         </span>
@@ -327,6 +334,7 @@ function App() {
                     <div className="controls-row">
                       {/* Lumières */}
                       <div className="actuator-status-container">
+                        <span className={`led-bulb ${isOffline ? 'offline' : (light === 'ON' ? 'active-warning' : 'inactive')}`}></span>
                         <span className="actuator-label">
                           <Lightbulb size={14} /> Gyrophares
                         </span>

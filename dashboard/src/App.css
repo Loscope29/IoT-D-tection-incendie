@@ -226,31 +226,100 @@
 }
 
 .sensor-control-card {
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  padding: 0.85rem;
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(71, 85, 105, 0.25);
+  border-radius: 6px;
+  padding: 1.1rem 1.25rem;
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  border-left: 5px solid #475569;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.85rem;
+  position: relative;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 4px 6px -1px rgba(0, 0, 0, 0.3);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sensor-control-card:hover:not(.sensor-offline) {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
+  border-left-color: var(--clr-primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 10px 15px -3px rgba(0, 0, 0, 0.4);
 }
 
 .sensor-control-card.sensor-offline {
   opacity: 0.55;
+  border-left-color: var(--text-muted);
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.2) 0%, rgba(15, 23, 42, 0.2) 100%);
   background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255, 255, 255, 0.005) 10px, rgba(255, 255, 255, 0.005) 20px);
+}
+
+/* Rack Screws */
+.rack-screw {
+  width: 6px;
+  height: 6px;
+  background: radial-gradient(circle, #94a3b8 20%, #475569 80%);
+  border-radius: 50%;
+  position: absolute;
+  box-shadow: 0 1px 1px rgba(0,0,0,0.5);
+  opacity: 0.5;
+}
+.rack-screw::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: #334155;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.rack-screw.top-left { top: 6px; left: 6px; }
+.rack-screw.top-right { top: 6px; right: 6px; }
+.rack-screw.bottom-left { bottom: 6px; left: 6px; }
+.rack-screw.bottom-right { bottom: 6px; right: 6px; }
+
+/* LED indicator bulbs */
+.led-bulb {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #334155;
+  box-shadow: inset 0 1px 1px rgba(0,0,0,0.5);
+  display: inline-block;
+  transition: all 0.3s ease;
+  margin-right: -0.25rem;
+}
+
+@keyframes led-flash {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; filter: brightness(1.25); }
+}
+
+.led-bulb.active-danger {
+  background-color: #ef4444;
+  box-shadow: 0 0 10px #ef4444, inset 0 1px 1px rgba(255,255,255,0.4);
+  animation: led-flash 1s infinite ease-in-out;
+}
+
+.led-bulb.active-warning {
+  background-color: #f59e0b;
+  box-shadow: 0 0 10px #f59e0b, inset 0 1px 1px rgba(255,255,255,0.4);
+  animation: led-flash 1.5s infinite ease-in-out;
+}
+
+.led-bulb.inactive {
+  background-color: #1e293b;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+
+.led-bulb.offline {
+  background-color: #0f172a;
 }
 
 .sensor-control-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   padding-bottom: 0.5rem;
 }
 
@@ -260,7 +329,6 @@
 }
 
 .sensor-eui {
-  font-family: monospace;
   font-size: 0.75rem;
   color: var(--text-secondary);
 }
@@ -275,7 +343,7 @@
 .actuator-status-container {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;
   flex-grow: 1;
 }
 
@@ -295,12 +363,12 @@
 }
 
 .actuator-state-badge.active {
-  background: rgba(16, 185, 129, 0.2);
-  color: #6ee7b7;
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--clr-success);
 }
 
 .actuator-state-badge.inactive {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.03);
   color: var(--text-muted);
 }
 
@@ -310,38 +378,47 @@
 }
 
 .control-btn {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, #334155 0%, #1e293b 100%);
+  border: 1px solid #475569;
+  border-bottom: 2.5px solid #0f172a;
   color: var(--text-primary);
   padding: 0.35rem 0.85rem;
-  border-radius: 6px;
+  border-radius: 4px;
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.1s cubic-bezier(0.4, 0, 0.2, 1);
   outline: none;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.5);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
 .control-btn:hover:not(:disabled) {
-  background: var(--clr-primary);
-  border-color: var(--clr-primary);
-  color: #0f172a;
-  box-shadow: 0 0 12px rgba(34, 197, 94, 0.4);
+  background: linear-gradient(180deg, #475569 0%, #334155 100%);
+  border-color: #64748b;
+  box-shadow: 0 3px 6px rgba(0,0,0,0.3);
 }
 
 .control-btn:active:not(:disabled) {
-  transform: scale(0.96);
+  transform: translateY(1.5px);
+  border-bottom-width: 1px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 
 .control-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: not-allowed;
+  border-bottom-width: 1px;
+  box-shadow: none;
 }
 
 .control-btn.btn-active {
-  background: rgba(34, 197, 94, 0.15);
-  border-color: var(--clr-primary);
-  color: var(--clr-primary);
+  background: linear-gradient(180deg, #22c55e 0%, #15803d 100%);
+  border-color: #4ade80;
+  border-bottom-color: #14532d;
+  color: #0f172a;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.25);
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.3);
 }
 
 /* Event Logs (Bottom Right) */
@@ -471,10 +548,14 @@
 }
 
 .synoptic-room-card {
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border: 1px solid rgba(71, 85, 105, 0.35);
+  border-radius: 6px;
   padding: 0.85rem;
-  background: rgba(255, 255, 255, 0.01);
+  background-color: rgba(15, 23, 42, 0.45);
+  background-image: 
+    linear-gradient(0deg, rgba(71, 85, 105, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(71, 85, 105, 0.05) 1px, transparent 1px);
+  background-size: 10px 10px;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -490,18 +571,22 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background: linear-gradient(135deg, rgba(255,255,255,0.02) 0%, transparent 100%);
+  border: 1px solid rgba(255, 255, 255, 0.02);
   pointer-events: none;
 }
 
 .synoptic-room-card.fire-alarm-active {
-  border-color: rgba(239, 68, 68, 0.5);
+  border-color: rgba(239, 68, 68, 0.6);
   box-shadow: 0 0 15px rgba(239, 68, 68, 0.25);
-  background: rgba(239, 68, 68, 0.03);
+  background-color: rgba(239, 68, 68, 0.05);
+  background-image: 
+    linear-gradient(0deg, rgba(239, 68, 68, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(239, 68, 68, 0.08) 1px, transparent 1px);
 }
 
 .synoptic-room-card.room-offline {
   opacity: 0.55;
+  background-color: rgba(15, 23, 42, 0.2);
   background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255, 255, 255, 0.005) 10px, rgba(255, 255, 255, 0.005) 20px);
   border-color: rgba(71, 85, 105, 0.2);
 }
