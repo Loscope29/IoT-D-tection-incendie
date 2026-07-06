@@ -3,3 +3,6 @@
 /capteur/capteur
 iot-pipeline-course.html
 .env
+.agents
+.vscode
+/design-system
