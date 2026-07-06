@@ -11,7 +11,13 @@ import {
   WifiOff, 
   Terminal, 
   CheckCircle,
-  Activity
+  Activity,
+  Sun,
+  Moon,
+  Search,
+  Clock,
+  ShieldCheck,
+  EyeOff
 } from 'lucide-react';
 import './App.css';
 
@@ -39,6 +45,42 @@ const INITIAL_SENSORS = {
   }
 };
 
+// Coordonnées pour la carte mentale interactive (graphe)
+const NODE_COORDINATES = {
+  'AA00000000000001': { 
+    x: 110, y: 90, 
+    sirenX: 70, sirenY: 70, 
+    lightX: 110, lightY: 40,
+    hubPath: "M 180,180 V 90 H 110",
+    sirenPath: "M 110,90 H 70 V 70",
+    lightPath: "M 110,90 V 40"
+  },
+  'AA00000000000002': { 
+    x: 80, y: 180, 
+    sirenX: 40, sirenY: 150, 
+    lightX: 40, lightY: 210,
+    hubPath: "M 180,180 H 80",
+    sirenPath: "M 80,180 H 60 V 150 H 40",
+    lightPath: "M 80,180 H 60 V 210 H 40"
+  },
+  'AA00000000000003': { 
+    x: 110, y: 270, 
+    sirenX: 110, sirenY: 320, 
+    lightX: 70, lightY: 290,
+    hubPath: "M 180,180 V 270 H 110",
+    sirenPath: "M 110,270 V 320",
+    lightPath: "M 110,270 H 70 V 290"
+  },
+  'AA00000000000004': { 
+    x: 490, y: 120, 
+    sirenX: 530, sirenY: 90, 
+    lightX: 490, lightY: 70,
+    hubPath: "M 420,180 V 120 H 490",
+    sirenPath: "M 490,120 H 530 V 90",
+    lightPath: "M 490,120 V 70"
+  }
+};
+
 function App() {
   const [sensors, setSensors] = useState(INITIAL_SENSORS);
   const [mqttConnected, setMqttConnected] = useState(false);
@@ -46,6 +88,22 @@ function App() {
     { time: new Date().toLocaleTimeString(), msg: "Système de supervision initialisé.", type: "system" }
   ]);
   
+  // Nouveaux états de navigation, d'acquittement et de style (Style Hôpital William Morey)
+  const [activeTab, setActiveTab] = useState('supervision'); // 'supervision', 'rooms', 'journal'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [acknowledgedAlerts, setAcknowledgedAlerts] = useState({}); // dev_eui -> details
+  const [inhibitedSensors, setInhibitedSensors] = useState({}); // dev_eui -> boolean
+  const [selectedAlert, setSelectedAlert] = useState(null); // sensor object
+  const [alertTimers, setAlertTimers] = useState({}); // dev_eui -> seconds elapsed
+  const [alertTriggers, setAlertTriggers] = useState({}); // dev_eui -> { timestamp, smoke_level, temperature }
+
+  // Formulaire d'acquittement temporaire
+  const [tempMotifs, setTempMotifs] = useState([]);
+  const [tempActions, setTempActions] = useState([]);
+  const [tempImpact, setTempImpact] = useState('Aucun');
+  const [tempComment, setTempComment] = useState('');
+
   const mqttClientRef = useRef(null);
 
   useEffect(() => {
@@ -92,7 +150,15 @@ function App() {
         const telemetry = JSON.parse(message.toString());
         const dev_eui = telemetry.dev_eui;
         
-        if (dev_eui) {
+        // Sécurité : n'accepter que les capteurs connus configurés dans le système de coordonnées
+        if (dev_eui && NODE_COORDINATES[dev_eui]) {
+          // Extraire le site du topic si manquant dans le payload
+          const topicParts = topic.split('/');
+          const siteFromTopic = topicParts[1] || 'paris';
+
+          if (!telemetry.location) telemetry.location = {};
+          if (!telemetry.location.site) telemetry.location.site = siteFromTopic;
+
           // Mise à jour de l'état du capteur
           setSensors(prev => ({
             ...prev,
@@ -100,12 +166,46 @@ function App() {
           }));
 
           const { site, batiment, salle } = telemetry.location;
-          const { smoke_level, temperature, battery_level, status } = telemetry.readings;
+          const { smoke_level, temperature, battery_level } = telemetry.readings;
           
           const isFire = smoke_level >= 50.0 || temperature >= 60.0;
-          const logText = `[Uplink] ${site}/${batiment}/${salle} - Fumée: ${smoke_level} ppm | Temp: ${temperature}°C | Batterie: ${battery_level}%`;
+          const logText = `[Uplink] ${site.toUpperCase()}/${batiment}/${salle} - Fumée: ${smoke_level} ppm | Temp: ${temperature}°C | Batterie: ${battery_level}%`;
           
           logMessage(logText, isFire ? 'alert' : 'info');
+
+          // Gérer le déclenchement de l'alerte pour le chronomètre d'acquittement
+          if (isFire) {
+            setAlertTriggers(prev => {
+              if (!prev[dev_eui]) {
+                return {
+                  ...prev,
+                  [dev_eui]: {
+                    timestamp: new Date().toLocaleTimeString(),
+                    smoke_level,
+                    temperature
+                  }
+                };
+              }
+              return prev;
+            });
+          } else {
+            // Nettoyage si retour à la normale
+            setAlertTriggers(prev => {
+              const updated = { ...prev };
+              delete updated[dev_eui];
+              return updated;
+            });
+            setAlertTimers(prev => {
+              const updated = { ...prev };
+              delete updated[dev_eui];
+              return updated;
+            });
+            setAcknowledgedAlerts(prev => {
+              const updated = { ...prev };
+              delete updated[dev_eui];
+              return updated;
+            });
+          }
         }
       } catch (e) {
         logMessage(`Erreur parsing message MQTT : ${e.message}`, "alert");
@@ -128,6 +228,35 @@ function App() {
     };
   }, []);
 
+  // Incrémenter les timers d'alerte en temps réel toutes les secondes (Alerte depuis...)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAlertTimers(prev => {
+        const updated = { ...prev };
+        let changed = false;
+        Object.keys(alertTriggers).forEach(eui => {
+          if (!acknowledgedAlerts[eui] && !inhibitedSensors[eui]) {
+            updated[eui] = (updated[eui] || 0) + 1;
+            changed = true;
+          }
+        });
+        return changed ? updated : prev;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [alertTriggers, acknowledgedAlerts, inhibitedSensors]);
+
+  // Gérer la classe de thème sur le body
+  useEffect(() => {
+    if (isDarkMode) {
+      document.body.classList.add('dark-theme');
+      document.body.classList.remove('light-theme');
+    } else {
+      document.body.classList.add('light-theme');
+      document.body.classList.remove('dark-theme');
+    }
+  }, [isDarkMode]);
+
   // Fonction utilitaire pour ajouter un log
   const logMessage = (msg, type = 'info') => {
     const timeString = new Date().toLocaleTimeString();
@@ -145,337 +274,933 @@ function App() {
     }
 
     const { site, batiment, salle, machine } = sensor.location;
-    // Format de topic attendu par la gateway : fire/{site}/{batiment}/{salle}/{machine}/cmd/{action}
     const topic = `fire/${site}/${batiment}/${salle}/${machine}/cmd/${action}`;
     
     logMessage(`[Downlink Command] Publication -> ${action.toUpperCase()}=${value} pour ${site}/${batiment}/${salle}`, "system");
     mqttClientRef.current.publish(topic, value, { qos: 1, retain: false });
   };
 
-  // Traiter les alertes d'incendie (haut gauche)
-  const fireAlerts = Object.values(sensors).filter(s => {
+  // Enregistrer l'acquittement de l'alerte
+  const handleSaveAcknowledge = () => {
+    if (!selectedAlert) return;
+    const dev_eui = selectedAlert.dev_eui;
+    const { site, batiment, salle } = selectedAlert.location;
+
+    setAcknowledgedAlerts(prev => ({
+      ...prev,
+      [dev_eui]: {
+        motifs: tempMotifs,
+        actions: tempActions,
+        impact: tempImpact,
+        comment: tempComment,
+        timestamp: new Date().toLocaleTimeString(),
+        duration: alertTimers[dev_eui] || 0
+      }
+    }));
+
+    const logText = `[Acquittement] ${site.toUpperCase()}/${batiment}/${salle} acquitté - Motif: ${tempMotifs.join(', ') || 'Non spécifié'} | Action: ${tempActions.join(', ') || 'Aucune'} | Impact: ${tempImpact}`;
+    logMessage(logText, "success");
+
+    // Fermer le volet et réinitialiser le formulaire
+    setSelectedAlert(null);
+    setTempMotifs([]);
+    setTempActions([]);
+    setTempImpact('Aucun');
+    setTempComment('');
+  };
+
+  // Activer le volet d'acquittement pour un capteur spécifique
+  const openAcknowledgePanel = (sensor) => {
+    setSelectedAlert(sensor);
+    setTempMotifs([]);
+    setTempActions([]);
+    setTempImpact('Aucun');
+    setTempComment('');
+  };
+
+  // Activer ou désactiver l'inhibition d'un capteur
+  const toggleInhibit = (dev_eui) => {
+    const sensor = sensors[dev_eui];
+    const { site, batiment, salle } = sensor.location;
+    const isNowInhibited = !inhibitedSensors[dev_eui];
+    
+    setInhibitedSensors(prev => ({
+      ...prev,
+      [dev_eui]: isNowInhibited
+    }));
+
+    if (isNowInhibited) {
+      logMessage(`[Configuration] Capteur ${site.toUpperCase()}/${batiment}/${salle} INHIBÉ (surveillance suspendue).`, "warning");
+    } else {
+      logMessage(`[Configuration] Capteur ${site.toUpperCase()}/${batiment}/${salle} RÉACTIVÉ.`, "system");
+    }
+  };
+
+  // Formatter la durée d'une alerte en chaîne lisible
+  const formatAlertDuration = (seconds) => {
+    if (!seconds) return "0s";
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
+
+  // --- FILTRES ET COMPTEURS DYNAMIQUES ---
+
+  // 1. Alertes Incendie en cours (Hors capteurs inhibés)
+  const activeFireAlerts = Object.values(sensors).filter(s => {
     const { smoke_level, temperature } = s.readings;
-    return smoke_level >= 50.0 || temperature >= 60.0;
+    return (smoke_level >= 50.0 || temperature >= 60.0) && !inhibitedSensors[s.dev_eui];
   });
 
-  // Traiter les alertes techniques (bas gauche)
+  // 2. Alertes Incendie non traitées (Non acquittées par l'opérateur)
+  const untreatedAlerts = activeFireAlerts.filter(s => !acknowledgedAlerts[s.dev_eui]);
+
+  // 3. Équipements déconnectés
+  const disconnectedAlerts = Object.values(sensors).filter(s => {
+    return s.readings.status === "inactive" || s.readings.status === "connecting";
+  });
+
+  // 4. Équipements inhibés
+  const inhibitedCount = Object.values(sensors).filter(s => inhibitedSensors[s.dev_eui]).length;
+
+  // 5. Équipements en préalarme (valeurs hautes mais sous le seuil d'incendie, ou batterie faible, non inhibés)
+  const prealarmAlerts = Object.values(sensors).filter(s => {
+    const { smoke_level, temperature, battery_level } = s.readings;
+    const isFire = smoke_level >= 50.0 || temperature >= 60.0;
+    const isPrealarm = (smoke_level >= 25.0 && smoke_level < 50.0) || (temperature >= 45.0 && temperature < 60.0);
+    const isLowBattery = battery_level > 0 && battery_level < 20;
+    return (isPrealarm || isLowBattery) && !isFire && !inhibitedSensors[s.dev_eui];
+  });
+
+  // 6. Alertes techniques (batterie faible ou hors-ligne)
   const technicalAlerts = Object.values(sensors).filter(s => {
     const { battery_level, status } = s.readings;
-    return (battery_level > 0 && battery_level < 20) || status === "inactive";
+    const isOffline = status === "inactive" || status === "connecting";
+    const isLowBattery = battery_level > 0 && battery_level < 20;
+    return isOffline || isLowBattery;
   });
 
-  // Calcul du nombre de sirènes et lumières actives
-  const activeSirensCount = Object.values(sensors).filter(s => s.readings.siren === "ON").length;
-  const activeLightsCount = Object.values(sensors).filter(s => s.readings.light === "ON").length;
+  // Filtrer les capteurs pour l'onglet de recherche
+  const filteredSensors = Object.values(sensors).filter(s => {
+    const query = searchQuery.toLowerCase();
+    const { site, batiment, salle } = s.location;
+    return (
+      site.toLowerCase().includes(query) ||
+      batiment.toLowerCase().includes(query) ||
+      salle.toLowerCase().includes(query) ||
+      s.dev_eui.toLowerCase().includes(query)
+    );
+  });
 
   return (
-    <div className="dashboard-container">
-      {/* Header */}
+    <div className={`dashboard-container ${isDarkMode ? 'dark-theme' : 'light-theme'}`}>
+      
+      {/* HEADER PROFESSIONNEL  */}
       <header className="dashboard-header">
-        <div className="header-title-container">
-          <Activity className="glow-success" size={28} />
-          <h1 className="header-title">Supervision Incendie</h1>
+        <div className="header-left">
+          <div className="header-logo-circle">
+            <Flame size={20} className="glow-success" />
+          </div>
+          <h1 className="header-title">Fire Protection</h1>
         </div>
-        <div className="connection-status">
-          {mqttConnected ? (
-            <>
-              <Wifi size={18} className="glow-success" />
-              <span className="glow-success">HiveMQ Connecté (WS)</span>
-            </>
-          ) : (
-            <>
-              <WifiOff size={18} className="glow-danger animate-pulse" />
-              <span className="glow-danger">HiveMQ Déconnecté</span>
-            </>
-          )}
+
+        {/* Onglets de navigation */}
+        <nav className="header-tabs">
+          <button 
+            className={`tab-btn ${activeTab === 'supervision' ? 'tab-btn-active' : ''}`}
+            onClick={() => setActiveTab('supervision')}
+          >
+            <Activity size={16} />
+            <span>Supervision Incendie</span>
+          </button>
+          <button 
+            className={`tab-btn ${activeTab === 'rooms' ? 'tab-btn-active' : ''}`}
+            onClick={() => setActiveTab('rooms')}
+          >
+            <Search size={16} />
+            <span>État des Salles</span>
+          </button>
+          <button 
+            className={`tab-btn ${activeTab === 'control' ? 'tab-btn-active' : ''}`}
+            onClick={() => setActiveTab('control')}
+          >
+            <ShieldAlert size={16} />
+            <span>Console de Contrôle</span>
+          </button>
+        </nav>
+
+        <div className="header-right">
+          {/* Commutateur de thème */}
+          <button 
+            className="theme-toggle-btn"
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            title={isDarkMode ? "Passer en mode clair (Hôpital)" : "Passer en mode sombre (OLED)"}
+          >
+            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+
+          {/* Statut de connexion */}
+          <div className="connection-status">
+            {mqttConnected ? (
+              <>
+                <Wifi size={16} className="text-success" />
+                <span className="text-success font-mono">HiveMQ WS</span>
+              </>
+            ) : (
+              <>
+                <WifiOff size={16} className="text-danger animate-pulse" />
+                <span className="text-danger font-mono">Déconnecté</span>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
-      {/* Summary Cards */}
+      {/* METRICS SUMMARY BAR (Style CH William Morey) */}
       <section className="metrics-summary-bar">
-        <div className="summary-card">
-          <div className={`summary-icon-container ${fireAlerts.length > 0 ? 'danger' : 'success'}`}>
-            <Flame size={22} className={fireAlerts.length > 0 ? 'animate-pulse' : ''} />
-          </div>
-          <div className="summary-info">
-            <span className="summary-value font-mono">{fireAlerts.length}</span>
-            <span className="summary-label">Alertes Incendie</span>
-          </div>
+        {/* 1. Alertes en cours */}
+        <div className={`metric-card card-solid-red ${activeFireAlerts.length > 0 ? 'pulse-danger' : ''}`}>
+          <div className="metric-header">Alertes en cours</div>
+          <div className="metric-value font-mono">{activeFireAlerts.length}</div>
+          <div className="metric-sub">Équipements</div>
         </div>
 
-        <div className="summary-card">
-          <div className={`summary-icon-container ${technicalAlerts.length > 0 ? 'warning' : 'success'}`}>
-            <Wrench size={22} />
-          </div>
-          <div className="summary-info">
-            <span className="summary-value font-mono">{technicalAlerts.length}</span>
-            <span className="summary-label">Alertes Tech</span>
-          </div>
+        {/* 2. Alertes non traitées */}
+        <div className={`metric-card card-border-red ${untreatedAlerts.length > 0 ? 'pulse-border' : ''}`}>
+          <div className="metric-header text-danger">Alertes non traitées</div>
+          <div className="metric-value font-mono text-danger">{untreatedAlerts.length}</div>
+          <div className="metric-sub text-muted">Équipements</div>
         </div>
 
-        <div className="summary-card">
-          <div className="summary-icon-container">
-            <Volume2 size={22} className={activeSirensCount > 0 ? 'glow-danger animate-pulse' : ''} />
-          </div>
-          <div className="summary-info">
-            <span className="summary-value font-mono">{activeSirensCount} / 4</span>
-            <span className="summary-label">Sirènes Actives</span>
-          </div>
+        {/* 3. Équipements déconnectés */}
+        <div className="metric-card card-solid-grey">
+          <div className="metric-header">Équipement déconnecté</div>
+          <div className="metric-value font-mono">{disconnectedAlerts.length}</div>
+          <div className="metric-sub text-muted">Équipements</div>
         </div>
 
-        <div className="summary-card">
-          <div className="summary-icon-container">
-            <Lightbulb size={22} className={activeLightsCount > 0 ? 'glow-success animate-pulse' : ''} />
-          </div>
-          <div className="summary-info">
-            <span className="summary-value font-mono">{activeLightsCount} / 4</span>
-            <span className="summary-label">Gyrophares Actifs</span>
-          </div>
+        {/* 4. Équipements inhibés */}
+        <div className="metric-card card-border-yellow">
+          <div className="metric-header text-warning">Équipement inhibé</div>
+          <div className="metric-value font-mono text-warning">{inhibitedCount}</div>
+          <div className="metric-sub text-muted">Équipements</div>
+        </div>
+
+        {/* 5. Équipements en préalarme */}
+        <div className="metric-card card-border-orange">
+          <div className="metric-header text-orange">Équipement en préalarme</div>
+          <div className="metric-value font-mono text-orange">{prealarmAlerts.length}</div>
+          <div className="metric-sub text-muted">Équipements</div>
         </div>
       </section>
 
-      {/* 4 Quadrants Grid */}
-      <main className="dashboard-grid">
+      {/* RENDER PRINCIPAL DE LA VUE ACTIVE */}
+      <main className="dashboard-main-content">
         
-        {/* HAUT GAUCHE : Alertes Incendie */}
-        <section className="quadrant-card">
-          <div className="card-header">
-            <div className="card-title-container">
-              <Flame size={18} className="glow-danger" />
-              <h2 className="card-title">Alertes Incendie Actives</h2>
+        {activeTab === 'supervision' && (
+          <div className="dashboard-grid">
+            {/* Colonne de Gauche : Listes des Alerte actives & Contrôles */}
+            <div className="dashboard-sidebar-column">
+              
+              {/* Alertes Incendie Actives */}
+              <section className="quadrant-card">
+                <div className="card-header">
+                  <div className="card-title-container">
+                    <Flame size={18} className="glow-danger" />
+                    <h2 className="card-title">Incendies Détectés</h2>
+                  </div>
+                  <span className={`badge-count ${activeFireAlerts.length > 0 ? 'danger' : ''}`}>
+                    {activeFireAlerts.length}
+                  </span>
+                </div>
+                <div className="card-content">
+                  {activeFireAlerts.length === 0 ? (
+                    <div className="empty-state">
+                      <CheckCircle size={32} className="text-success" />
+                      <p>Aucun incendie détecté sur les sites.</p>
+                    </div>
+                  ) : (
+                    <div className="alerts-list">
+                      {activeFireAlerts.map(sensor => {
+                        const { dev_eui } = sensor;
+                        const { site, batiment, salle } = sensor.location;
+                        const { smoke_level, temperature } = sensor.readings;
+                        const isAcked = !!acknowledgedAlerts[dev_eui];
+                        const duration = alertTimers[dev_eui];
+                        
+                        return (
+                          <div key={dev_eui} className={`alert-item-hospital ${isAcked ? 'acked' : 'unacked'}`}>
+                            <div className="alert-item-header">
+                              <span className="alert-item-location">{site.toUpperCase()} — {salle.replace('salle_', 'Salle ')}</span>
+                              <span className="alert-item-time font-mono">
+                                <Clock size={12} style={{ marginRight: '3px' }} />
+                                {formatAlertDuration(duration)}
+                              </span>
+                            </div>
+                            <div className="alert-item-body">
+                              <div className="alert-values">
+                                <span className="alert-pill font-mono">{smoke_level} ppm</span>
+                                <span className="alert-pill font-mono">{temperature} °C</span>
+                              </div>
+                              
+                              {isAcked ? (
+                                <span className="acked-badge">
+                                  <ShieldCheck size={14} />
+                                  <span>Acquittée</span>
+                                </span>
+                              ) : (
+                                <button 
+                                  className="ack-btn-red"
+                                  onClick={() => openAcknowledgePanel(sensor)}
+                                >
+                                  Traiter
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              {/* Alertes Techniques & Maintenance */}
+              <section className="quadrant-card">
+                <div className="card-header">
+                  <div className="card-title-container">
+                    <Wrench size={18} className="glow-warning" />
+                    <h2 className="card-title">Maintenance & Diagnostic</h2>
+                  </div>
+                  <span className={`badge-count ${technicalAlerts.length > 0 ? 'warning' : ''}`} style={{ background: technicalAlerts.length > 0 ? 'var(--clr-warning)' : '', color: technicalAlerts.length > 0 ? '#fff' : '' }}>
+                    {technicalAlerts.length}
+                  </span>
+                </div>
+                <div className="card-content">
+                  {technicalAlerts.length === 0 ? (
+                    <div className="empty-state">
+                      <CheckCircle size={32} className="text-success" />
+                      <p>Tous les capteurs fonctionnent normalement.</p>
+                    </div>
+                  ) : (
+                    <div className="alerts-list">
+                      {technicalAlerts.map(sensor => {
+                        const { dev_eui } = sensor;
+                        const { site, batiment, salle } = sensor.location;
+                        const { battery_level, status } = sensor.readings;
+                        const isOffline = status === "inactive" || status === "connecting";
+                        
+                        return (
+                          <div key={dev_eui} className="alert-item-hospital warning" style={{ borderColor: 'var(--clr-warning)', backgroundColor: 'rgba(245, 158, 11, 0.03)' }}>
+                            <div className="alert-item-header">
+                              <span className="alert-item-location">{site.toUpperCase()} — {salle.replace('salle_', 'Salle ')}</span>
+                              {isOffline ? (
+                                <span className="acked-badge" style={{ color: 'var(--text-muted)', borderColor: 'var(--border-subtle)', background: 'transparent' }}>
+                                  Hors-ligne
+                                </span>
+                              ) : (
+                                <span className="acked-badge" style={{ color: 'var(--clr-warning)', borderColor: 'rgba(245, 158, 11, 0.3)', background: 'rgba(245, 158, 11, 0.05)' }}>
+                                  Batterie Faible
+                                </span>
+                              )}
+                            </div>
+                            <div className="alert-item-body" style={{ marginTop: '0.4rem' }}>
+                              <span className="sensor-eui-lbl">ID: {dev_eui.slice(-4)} | Ref: <span className="font-mono">{dev_eui}</span></span>
+                              {!isOffline && (
+                                <span className="alert-pill font-mono" style={{ color: 'var(--clr-warning)', borderColor: 'rgba(245, 158, 11, 0.2)' }}>
+                                  {battery_level}%
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </section>
+
             </div>
-            <span className={`badge-count ${fireAlerts.length > 0 ? 'danger' : ''}`}>
-              {fireAlerts.length}
-            </span>
-          </div>
-          <div className="card-content">
-            {fireAlerts.length === 0 ? (
-              <div className="empty-state">
-                <CheckCircle size={36} className="glow-success" />
-                <p>Aucun incendie détecté. Tous les sites sont sécurisés.</p>
-              </div>
-            ) : (
-              <div className="alerts-list">
-                {fireAlerts.map(sensor => {
-                  const { site, batiment, salle, machine } = sensor.location;
-                  const { smoke_level, temperature } = sensor.readings;
-                  return (
-                    <div key={sensor.dev_eui} className="alert-item danger alert-fire-active">
-                      <div className="alert-info">
-                        <span className="alert-location">{site.toUpperCase()} — {batiment} ({salle})</span>
-                        <span className="alert-details">ID: {machine} | Ref: <span className="font-mono">{sensor.dev_eui.slice(-4)}</span></span>
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <span className="alert-badge danger font-mono">{smoke_level} ppm</span>
-                        <span className="alert-badge danger font-mono">{temperature} °C</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </section>
 
-        {/* HAUT DROITE : Contrôle des Actuateurs (Boutons Downlink) */}
-        <section className="quadrant-card">
-          <div className="card-header">
-            <div className="card-title-container">
-              <Volume2 size={18} className="glow-success" />
-              <h2 className="card-title">Panneau de Contrôle Actuateurs</h2>
+            {/* Colonne de Droite : La Carte Mentale interactive */}
+            <div className="dashboard-content-column">
+              <section className="quadrant-card">
+                <div className="card-header">
+                  <div className="card-title-container">
+                    <Activity size={18} className="glow-success" />
+                    <h2 className="card-title">Carte Mentale & Topologie Réseau</h2>
+                  </div>
+                </div>
+                <div className="card-content" style={{ overflow: 'hidden', padding: 0 }}>
+                  <div className="graph-container">
+                    <svg viewBox="0 0 680 400" className="graph-svg">
+                      <defs>
+                        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                          <path d="M2 1L8 5L2 9" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </marker>
+                      </defs>
+
+                      {/* Liaisons centrale -> hubs */}
+                      <line x1="340" y1="80" x2="170" y2="138" stroke="#378ADD" strokeWidth="1.5" markerEnd="url(#arrow)" />
+                      <line x1="340" y1="80" x2="510" y2="138" stroke="#7F77DD" strokeWidth="1.5" markerEnd="url(#arrow)" />
+
+                      {/* Liaisons hub Paris -> capteurs */}
+                      {Object.values(sensors)
+                        .filter(s => s.location.site === 'paris')
+                        .map((sensor, i) => {
+                          const { dev_eui } = sensor;
+                          const { status, smoke_level, temperature } = sensor.readings;
+                          const isOffline = status === 'inactive' || status === 'connecting';
+                          const isFire = (smoke_level >= 50.0 || temperature >= 60.0) && !inhibitedSensors[dev_eui];
+                          const x = 90 + i * 80;
+                          
+                          let strokeColor = '#1D9E75'; // Normal
+                          if (isOffline) strokeColor = '#888780';
+                          else if (isFire) strokeColor = '#E24B4A';
+                          else if (inhibitedSensors[dev_eui]) strokeColor = '#b58c1e';
+
+                          return (
+                            <line
+                              key={`link-paris-${dev_eui}`}
+                              x1="170" y1="182" x2={x} y2="236"
+                              stroke={strokeColor}
+                              strokeWidth={isFire ? 2 : 1.5}
+                              strokeDasharray={isOffline ? '4 4' : isFire ? '5 5' : undefined}
+                              markerEnd="url(#arrow)"
+                            />
+                          );
+                        })}
+
+                      {/* Liaisons hub Lyon -> capteurs */}
+                      {Object.values(sensors)
+                        .filter(s => s.location.site === 'lyon')
+                        .map((sensor, i) => {
+                          const { dev_eui } = sensor;
+                          const { status, smoke_level, temperature } = sensor.readings;
+                          const isOffline = status === 'inactive' || status === 'connecting';
+                          const isFire = (smoke_level >= 50.0 || temperature >= 60.0) && !inhibitedSensors[dev_eui];
+                          const x = 430 + i * 80;
+                          
+                          let strokeColor = '#1D9E75'; // Normal
+                          if (isOffline) strokeColor = '#888780';
+                          else if (isFire) strokeColor = '#E24B4A';
+                          else if (inhibitedSensors[dev_eui]) strokeColor = '#b58c1e';
+
+                          return (
+                            <line
+                              key={`link-lyon-${dev_eui}`}
+                              x1="510" y1="182" x2={x} y2="236"
+                              stroke={strokeColor}
+                              strokeWidth={isFire ? 2 : 1.5}
+                              strokeDasharray={isOffline ? '4 4' : isFire ? '5 5' : undefined}
+                              markerEnd="url(#arrow)"
+                            />
+                          );
+                        })}
+
+                      {/* Nœuds centrale */}
+                      <g className="node-group node-survey-group">
+                        <rect x="270" y="40" width="140" height="40" rx="8" className="node-rect node-rect-survey" strokeWidth="0.5" />
+                        <text x="340" y="60" textAnchor="middle" dominantBaseline="central" className="node-text-title">IBMH Survey</text>
+                      </g>
+
+                      {/* Hub Paris */}
+                      <g className="node-group node-hub-group">
+                        <rect x="110" y="140" width="120" height="40" rx="8" className="node-rect node-rect-paris" strokeWidth="0.5" />
+                        <text x="170" y="160" textAnchor="middle" dominantBaseline="central" className="node-text-title">Hub Paris</text>
+                      </g>
+
+                      {/* Hub Lyon */}
+                      <g className="node-group node-hub-group">
+                        <rect x="450" y="140" width="120" height="40" rx="8" className="node-rect node-rect-lyon" strokeWidth="0.5" />
+                        <text x="510" y="160" textAnchor="middle" dominantBaseline="central" className="node-text-title">Hub Lyon</text>
+                      </g>
+
+                      {/* Nœuds capteurs actifs */}
+                      {Object.values(sensors).map((sensor, i) => {
+                        const { dev_eui } = sensor;
+                        const { site, salle } = sensor.location;
+                        const { status, smoke_level, temperature, battery_level } = sensor.readings;
+                        const isOffline = status === 'inactive' || status === 'connecting';
+                        const isFire = (smoke_level >= 50.0 || temperature >= 60.0) && !inhibitedSensors[dev_eui];
+                        const isInhibited = inhibitedSensors[dev_eui];
+                        const isLowBattery = battery_level > 0 && battery_level < 20;
+
+                        const siteSensors = Object.values(sensors).filter(s => s.location.site === site);
+                        const idx = siteSensors.findIndex(s => s.dev_eui === dev_eui);
+                        const x = site === 'paris' ? 90 + idx * 80 : 430 + idx * 80;
+
+                        let nodeClass = 'node-sensor';
+                        if (isFire) nodeClass += ' node-sensor-fire';
+                        else if (isLowBattery) nodeClass += ' node-sensor-technical';
+                        else if (isOffline) nodeClass += ' node-sensor-offline';
+                        else if (isInhibited) nodeClass += ' node-sensor-inhibited';
+                        else nodeClass += ' node-sensor-normal';
+
+                        return (
+                          <g
+                            key={`sensor-${dev_eui}`}
+                            className={nodeClass}
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => isFire && !acknowledgedAlerts[dev_eui] && openAcknowledgePanel(sensor)}
+                          >
+                            <circle cx={x} cy="258" r="22" strokeWidth={isFire ? 1.5 : 0.5} strokeDasharray={isOffline ? '3 3' : undefined} />
+                            <text x={x} y="258" textAnchor="middle" dominantBaseline="central" className="node-text-sub">
+                              {salle.replace('salle_', 'S.')}
+                            </text>
+                          </g>
+                        );
+                      })}
+
+                      {/* Légende */}
+                      <g className="node-legend">
+                        <circle cx="80" cy="340" r="5" className="legend-dot legend-dot-normal" />
+                        <text x="92" y="340" dominantBaseline="central" className="node-text-sub">En ligne</text>
+                        
+                        <circle cx="180" cy="340" r="5" className="legend-dot legend-dot-fire" />
+                        <text x="192" y="340" dominantBaseline="central" className="node-text-sub">Danger Feu</text>
+                        
+                        <circle cx="290" cy="340" r="5" className="legend-dot legend-dot-offline" />
+                        <text x="302" y="340" dominantBaseline="central" className="node-text-sub">Hors ligne</text>
+
+                        <circle cx="400" cy="340" r="5" style={{ fill: '#b58c1e', stroke: 'rgba(181, 140, 30, 0.4)', strokeWidth: 1 }} />
+                        <text x="412" y="340" dominantBaseline="central" className="node-text-sub">Inhibé</text>
+
+                        <circle cx="510" cy="340" r="5" style={{ fill: '#f59e0b', stroke: 'rgba(245, 158, 11, 0.4)', strokeWidth: 1 }} />
+                        <text x="522" y="340" dominantBaseline="central" className="node-text-sub">Alerte Tech / Bat.</text>
+                      </g>
+                    </svg>
+                  </div>
+                </div>
+              </section>
             </div>
-            <span className="badge-count">Actif</span>
           </div>
-          <div className="card-content">
-            <div className="actuators-grid">
-              {Object.values(sensors).map(sensor => {
-                const { site, batiment, salle } = sensor.location;
-                const { siren, light, status } = sensor.readings;
-                const isOffline = status === "inactive" || status === "connecting";
-                
-                return (
-                  <div key={sensor.dev_eui} className={`sensor-control-card ${isOffline ? 'sensor-offline' : ''}`}>
-                    {/* Industrial Rack Mount Screws */}
-                    <div className="rack-screw top-left"></div>
-                    <div className="rack-screw top-right"></div>
-                    <div className="rack-screw bottom-left"></div>
-                    <div className="rack-screw bottom-right"></div>
+        )}
 
-                    <div className="sensor-control-header">
-                      <div>
-                        <span className="sensor-name">{site.toUpperCase()} — {batiment} ({salle})</span>
-                        <div className="sensor-eui font-mono">EUI: {sensor.dev_eui}</div>
+        {/* TAB 2 : ÉTAT DES SALLES (Grille dynamique style Hôpital William Morey) */}
+        {activeTab === 'rooms' && (
+          <section className="rooms-grid-tab">
+            <div className="search-bar-container">
+              <Search size={18} className="search-icon" />
+              <input 
+                type="text" 
+                placeholder="Rechercher une salle, un bâtiment ou un identifiant EUI..." 
+                className="search-input"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+
+            {/* Groupe Paris */}
+            <div className="rooms-group-section">
+              <h3 className="group-section-title">CHAMBRE DE SUPERVISION — PARIS</h3>
+              <div className="rooms-cards-grid">
+                {filteredSensors
+                  .filter(s => s.location.site === 'paris')
+                  .map(sensor => {
+                    const { dev_eui } = sensor;
+                    const { batiment, salle } = sensor.location;
+                    const { smoke_level, temperature, battery_level, status } = sensor.readings;
+                    const isOffline = status === "inactive" || status === "connecting";
+                    const isFire = (smoke_level >= 50.0 || temperature >= 60.0) && !inhibitedSensors[dev_eui];
+                    const isPrealarm = ((smoke_level >= 25.0 && smoke_level < 50.0) || (temperature >= 45.0 && temperature < 60.0)) && !isFire && !inhibitedSensors[dev_eui];
+                    const isInhibited = inhibitedSensors[dev_eui];
+                    const isLowBattery = battery_level > 0 && battery_level < 20;
+
+                    let cardClass = "room-supervision-card";
+                    if (isFire) cardClass += " card-state-fire";
+                    else if (isLowBattery) cardClass += " card-state-technical";
+                    else if (isOffline) cardClass += " card-state-offline";
+                    else if (isPrealarm) cardClass += " card-state-prealarm";
+                    else if (isInhibited) cardClass += " card-state-inhibited";
+                    
+                    return (
+                      <div key={dev_eui} className={cardClass}>
+                        <div className="room-card-header">
+                          <div className="room-card-title">
+                            <h4>{batiment.replace('batiment_', 'Bât. ')} — {salle.replace('salle_', 'Salle ')}</h4>
+                            <span className="room-card-subtitle">Capteur Optique & Thermique</span>
+                          </div>
+                          {isFire && !acknowledgedAlerts[dev_eui] && (
+                            <button className="card-alert-btn" onClick={() => openAcknowledgePanel(sensor)}>Traiter</button>
+                          )}
+                        </div>
+
+                        <div className="room-card-body">
+                          <div className="room-telemetry-col">
+                            <div className="telemetry-item">
+                              <span className="telemetry-value font-mono">{isOffline ? 'N/A' : `${temperature}°C`}</span>
+                              <span className="telemetry-lbl">Température</span>
+                            </div>
+                            <div className="telemetry-item">
+                              <span className="telemetry-value font-mono">{isOffline ? 'N/A' : `${smoke_level} ppm`}</span>
+                              <span className="telemetry-lbl">Fumée (Optique)</span>
+                            </div>
+                          </div>
+
+                          <div className="room-thresholds-col">
+                            <div className="threshold-line">
+                              <span className="threshold-lbl">Seuil haut</span>
+                              <span className="threshold-val font-mono">60°C / 50 ppm</span>
+                            </div>
+                            <div className="threshold-line">
+                              <span className="threshold-lbl">Seuil préalarme</span>
+                              <span className="threshold-val font-mono">45°C / 25 ppm</span>
+                            </div>
+                            <div className="threshold-line font-mono">
+                              <span className="threshold-lbl">Batterie</span>
+                              <span className={`threshold-val ${battery_level < 20 ? 'text-danger animate-pulse' : ''}`}>{isOffline ? 'N/A' : `${battery_level}%`}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="room-card-footer">
+                          <span className="sensor-eui-lbl">EUI: <span className="font-mono">{dev_eui}</span></span>
+                          <button 
+                            className={`inhibit-toggle-btn ${isInhibited ? 'inhibited' : ''}`}
+                            onClick={() => toggleInhibit(dev_eui)}
+                          >
+                            <EyeOff size={12} />
+                            {isInhibited ? 'Désinhiber' : 'Inhiber'}
+                          </button>
+                        </div>
                       </div>
-                      <span className={`indicator-dot ${isOffline ? 'inactive' : 'active'}`}></span>
+                    );
+                  })}
+              </div>
+            </div>
+
+            {/* Groupe Lyon */}
+            <div className="rooms-group-section">
+              <h3 className="group-section-title">CHAMBRE DE SUPERVISION — LYON</h3>
+              <div className="rooms-cards-grid">
+                {filteredSensors
+                  .filter(s => s.location.site === 'lyon')
+                  .map(sensor => {
+                    const { dev_eui } = sensor;
+                    const { batiment, salle } = sensor.location;
+                    const { smoke_level, temperature, battery_level, status } = sensor.readings;
+                    const isOffline = status === "inactive" || status === "connecting";
+                    const isFire = (smoke_level >= 50.0 || temperature >= 60.0) && !inhibitedSensors[dev_eui];
+                    const isPrealarm = ((smoke_level >= 25.0 && smoke_level < 50.0) || (temperature >= 45.0 && temperature < 60.0)) && !isFire && !inhibitedSensors[dev_eui];
+                    const isInhibited = inhibitedSensors[dev_eui];
+                    const isLowBattery = battery_level > 0 && battery_level < 20;
+
+                    let cardClass = "room-supervision-card";
+                    if (isFire) cardClass += " card-state-fire";
+                    else if (isLowBattery) cardClass += " card-state-technical";
+                    else if (isOffline) cardClass += " card-state-offline";
+                    else if (isPrealarm) cardClass += " card-state-prealarm";
+                    else if (isInhibited) cardClass += " card-state-inhibited";
+                    
+                    return (
+                      <div key={dev_eui} className={cardClass}>
+                        <div className="room-card-header">
+                          <div className="room-card-title">
+                            <h4>{batiment.replace('batiment_', 'Bât. ')} — {salle.replace('salle_', 'Salle ')}</h4>
+                            <span className="room-card-subtitle">Capteur Optique & Thermique</span>
+                          </div>
+                          {isFire && !acknowledgedAlerts[dev_eui] && (
+                            <button className="card-alert-btn" onClick={() => openAcknowledgePanel(sensor)}>Traiter</button>
+                          )}
+                        </div>
+
+                        <div className="room-card-body">
+                          <div className="room-telemetry-col">
+                            <div className="telemetry-item">
+                              <span className="telemetry-value font-mono">{isOffline ? 'N/A' : `${temperature}°C`}</span>
+                              <span className="telemetry-lbl">Température</span>
+                            </div>
+                            <div className="telemetry-item">
+                              <span className="telemetry-value font-mono">{isOffline ? 'N/A' : `${smoke_level} ppm`}</span>
+                              <span className="telemetry-lbl">Fumée (Optique)</span>
+                            </div>
+                          </div>
+
+                          <div className="room-thresholds-col">
+                            <div className="threshold-line">
+                              <span className="threshold-lbl">Seuil haut</span>
+                              <span className="threshold-val font-mono">60°C / 50 ppm</span>
+                            </div>
+                            <div className="threshold-line">
+                              <span className="threshold-lbl">Seuil préalarme</span>
+                              <span className="threshold-val font-mono">45°C / 25 ppm</span>
+                            </div>
+                            <div className="threshold-line font-mono">
+                              <span className="threshold-lbl">Batterie</span>
+                              <span className={`threshold-val ${battery_level < 20 ? 'text-danger animate-pulse' : ''}`}>{isOffline ? 'N/A' : `${battery_level}%`}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="room-card-footer">
+                          <span className="sensor-eui-lbl">EUI: <span className="font-mono">{dev_eui}</span></span>
+                          <button 
+                            className={`inhibit-toggle-btn ${isInhibited ? 'inhibited' : ''}`}
+                            onClick={() => toggleInhibit(dev_eui)}
+                          >
+                            <EyeOff size={12} />
+                            {isInhibited ? 'Désinhiber' : 'Inhiber'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {/* Slots Lyon Disponibles Statiques (pour correspondre au schéma) */}
+                  <div className="room-supervision-card card-state-empty">
+                    <div className="room-card-header">
+                      <div className="room-card-title">
+                        <h4>Emplacement Capteur Disponible</h4>
+                        <span className="room-card-subtitle">Prêt pour association LoRaWAN</span>
+                      </div>
                     </div>
-
-                    <div className="controls-row">
-                      {/* Sirène */}
-                      <div className="actuator-status-container">
-                        <span className={`led-bulb ${isOffline ? 'offline' : (siren === 'ON' ? 'active-danger' : 'inactive')}`}></span>
-                        <span className="actuator-label">
-                          <Volume2 size={14} /> Sirène
-                        </span>
-                        <span className={`actuator-state-badge ${siren === 'ON' ? 'active' : 'inactive'}`}>
-                          {siren}
-                        </span>
-                      </div>
-                      <div className="button-group">
-                        <button 
-                          className={`control-btn ${siren === 'ON' ? 'btn-active' : ''}`}
-                          onClick={() => sendCommand(sensor, 'siren', siren === 'ON' ? 'OFF' : 'ON')}
-                          disabled={isOffline}
-                        >
-                          {siren === 'ON' ? 'Éteindre' : 'Allumer'}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="controls-row">
-                      {/* Lumières */}
-                      <div className="actuator-status-container">
-                        <span className={`led-bulb ${isOffline ? 'offline' : (light === 'ON' ? 'active-warning' : 'inactive')}`}></span>
-                        <span className="actuator-label">
-                          <Lightbulb size={14} /> Gyrophares
-                        </span>
-                        <span className={`actuator-state-badge ${light === 'ON' ? 'active' : 'inactive'}`}>
-                          {light}
-                        </span>
-                      </div>
-                      <div className="button-group">
-                        <button 
-                          className={`control-btn ${light === 'ON' ? 'btn-active' : ''}`}
-                          onClick={() => sendCommand(sensor, 'light', light === 'ON' ? 'OFF' : 'ON')}
-                          disabled={isOffline}
-                        >
-                          {light === 'ON' ? 'Éteindre' : 'Allumer'}
-                        </button>
-                      </div>
+                    <div className="room-card-body-empty">
+                      <span>Logement d'équipement libre</span>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-
-        {/* BAS GAUCHE : Alertes Techniques */}
-        <section className="quadrant-card">
-          <div className="card-header">
-            <div className="card-title-container">
-              <ShieldAlert size={18} className="glow-danger" />
-              <h2 className="card-title">Maintenance & Alertes Techniques</h2>
-            </div>
-            <span className={`badge-count warning ${technicalAlerts.length > 0 ? 'warning' : ''}`}>
-              {technicalAlerts.length}
-            </span>
-          </div>
-          <div className="card-content">
-            {technicalAlerts.length === 0 ? (
-              <div className="empty-state">
-                <CheckCircle size={36} className="glow-success" />
-                <p>Aucune anomalie technique. Tous les capteurs sont opérationnels.</p>
-              </div>
-            ) : (
-              <div className="alerts-list">
-                {technicalAlerts.map(sensor => {
-                  const { site, batiment, salle, machine } = sensor.location;
-                  const { battery_level, status } = sensor.readings;
-                  
-                  const isLowBattery = battery_level > 0 && battery_level < 20;
-                  const isOffline = status === "inactive";
-                  
-                  return (
-                    <div key={sensor.dev_eui} className="alert-item warning">
-                      <div className="alert-info">
-                        <span className="alert-location">{site.toUpperCase()} — {batiment} ({salle})</span>
-                        <span className="alert-details">ID: {machine} | Ref: <span className="font-mono">{sensor.dev_eui.slice(-4)}</span></span>
-                      </div>
-                      <div>
-                        {isLowBattery && (
-                          <span className="alert-badge warning" style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
-                            <Battery size={12} /> Batterie : <span className="font-mono">{battery_level}%</span>
-                          </span>
-                        )}
-                        {isOffline && (
-                          <span className="alert-badge danger">
-                            Hors-ligne (Inactif)
-                          </span>
-                        )}
+                  <div className="room-supervision-card card-state-empty">
+                    <div className="room-card-header">
+                      <div className="room-card-title">
+                        <h4>Emplacement Capteur Disponible</h4>
+                        <span className="room-card-subtitle">Prêt pour association LoRaWAN</span>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* BAS DROITE : Synoptique Graphique des Équipements */}
-        <section className="quadrant-card">
-          <div className="card-header">
-            <div className="card-title-container">
-              <Activity size={18} className="glow-success" />
-              <h2 className="card-title">Synoptique Graphique des Équipements</h2>
-            </div>
-            <span className="badge-count" style={{ background: 'var(--clr-success)' }}>Interactif</span>
-          </div>
-          <div className="card-content">
-            <div className="synoptic-grid">
-              {Object.values(sensors).map(sensor => {
-                const { site, batiment, salle } = sensor.location;
-                const { smoke_level, temperature, siren, light, status } = sensor.readings;
-                const isFire = smoke_level >= 50.0 || temperature >= 60.0;
-                const isOffline = status === "inactive" || status === "connecting";
-                
-                return (
-                  <div key={sensor.dev_eui} className={`synoptic-room-card ${isFire ? 'fire-alarm-active' : ''} ${isOffline ? 'room-offline' : ''}`}>
-                    <div className="room-header">
-                      <span className="room-title">{site.toUpperCase()} — {batiment.replace('batiment_', 'Bât. ')} ({salle.replace('salle_', 'S.')})</span>
-                      <span className={`status-dot ${isOffline ? 'offline' : (isFire ? 'danger' : 'success')}`}></span>
-                    </div>
-
-                    <div className="room-layout">
-                      {/* Capteur */}
-                      <div className="equipment-node">
-                        <div className={`equipment-icon ${isOffline ? 'bg-dark' : (isFire ? 'bg-danger text-light' : 'bg-success text-light')}`}>
-                          <Flame size={16} className={isFire ? 'animate-pulse' : ''} />
-                        </div>
-                        <span className="equipment-label">Capteur</span>
-                        <span className="equipment-value font-mono">{isOffline ? 'N/A' : `${smoke_level} ppm`}</span>
-                        <span className="equipment-value font-mono">{isOffline ? '' : `${temperature} °C`}</span>
-                      </div>
-
-                      {/* Sirène */}
-                      <div className="equipment-node">
-                        <div className={`equipment-icon ${isOffline ? 'bg-dark' : (siren === 'ON' ? 'siren-active' : 'bg-dark text-muted')}`}>
-                          <Volume2 size={16} />
-                        </div>
-                        <span className="equipment-label">Sirène</span>
-                        <span className="equipment-value font-mono" style={{ color: siren === 'ON' ? 'var(--clr-danger)' : 'var(--text-secondary)' }}>
-                          {isOffline ? 'N/A' : siren}
-                        </span>
-                      </div>
-
-                      {/* Gyrophare */}
-                      <div className="equipment-node">
-                        <div className={`equipment-icon ${isOffline ? 'bg-dark' : (light === 'ON' ? 'light-active' : 'bg-dark text-muted')}`}>
-                          <Lightbulb size={16} />
-                        </div>
-                        <span className="equipment-label">Gyrophare</span>
-                        <span className="equipment-value font-mono" style={{ color: light === 'ON' ? 'var(--clr-warning)' : 'var(--text-secondary)' }}>
-                          {isOffline ? 'N/A' : light}
-                        </span>
-                      </div>
+                    <div className="room-card-body-empty">
+                      <span>Logement d'équipement libre</span>
                     </div>
                   </div>
-                );
-              })}
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        )}
+
+        {/* TAB 3 : CONSOLE DE CONTRÔLE PHYSIQUE */}
+        {activeTab === 'control' && (
+          <section className="control-console-tab">
+            <div className="quadrant-card control-console-card">
+              <div className="card-header">
+                <div className="card-title-container">
+                  <ShieldAlert size={18} className="glow-warning" />
+                  <h2 className="card-title">Console de Contrôle Physique</h2>
+                </div>
+              </div>
+              <div className="card-content">
+                <div className="control-rack-panel">
+                  {/* Vis du rack skeuomorphe */}
+                  <div className="rack-screw top-left"></div>
+                  <div className="rack-screw top-right"></div>
+                  <div className="rack-screw bottom-left"></div>
+                  <div className="rack-screw bottom-right"></div>
+
+                  <div className="rack-title">COMMANDE GÉNÉRALE ACTUATEURS</div>
+                  
+                  <div className="rack-grid">
+                    {Object.values(sensors).map(sensor => {
+                      const { dev_eui } = sensor;
+                      const { site, batiment, salle } = sensor.location;
+                      const { siren, light, status } = sensor.readings;
+                      const isOffline = status === "inactive" || status === "connecting" || inhibitedSensors[dev_eui];
+                      
+                      return (
+                        <div key={dev_eui} className={`rack-row ${isOffline ? 'rack-row-offline' : ''}`}>
+                          <div className="rack-label-container">
+                            <span className="rack-label-room">
+                              {batiment.replace('batiment_', 'Bât. ')} — {salle.replace('salle_', 'Salle ')} ({site.toUpperCase()})
+                            </span>
+                            {inhibitedSensors[dev_eui] && <span className="badge-inhibited" style={{ marginLeft: '8px' }}>INHIBÉ</span>}
+                          </div>
+                          
+                          <div className="rack-buttons-group">
+                            {/* Commande Sirène */}
+                            <div className="rack-control-block">
+                              <div className="rack-led-container">
+                                <div className={`led-bulb led-red ${siren === 'ON' && !isOffline ? 'led-active' : ''} ${isOffline ? 'led-offline' : ''}`}></div>
+                                <span className="led-lbl">Sirène</span>
+                              </div>
+                              <button 
+                                className={`rack-push-btn ${siren === 'ON' && !isOffline ? 'btn-pushed' : ''}`}
+                                onClick={() => sendCommand(sensor, 'siren', siren === 'ON' ? 'OFF' : 'ON')}
+                                disabled={isOffline}
+                              >
+                                {siren === 'ON' ? 'STOP' : 'TEST'}
+                              </button>
+                            </div>
+
+                            {/* Commande Gyrophare */}
+                            <div className="rack-control-block">
+                              <div className="rack-led-container">
+                                <div className={`led-bulb led-yellow ${light === 'ON' && !isOffline ? 'led-active' : ''} ${isOffline ? 'led-offline' : ''}`}></div>
+                                <span className="led-lbl">Gyr.</span>
+                              </div>
+                              <button 
+                                className={`rack-push-btn ${light === 'ON' && !isOffline ? 'btn-pushed' : ''}`}
+                                onClick={() => sendCommand(sensor, 'light', light === 'ON' ? 'OFF' : 'ON')}
+                                disabled={isOffline}
+                              >
+                                {light === 'ON' ? 'ÉTEINDRE' : 'ALLUMER'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
 
       </main>
+
+      {/* OVERLAY D'ACQUITTEMENT D'ALERTE (Style Hôpital William Morey) */}
+      {selectedAlert && (
+        <div className="ack-overlay-backdrop">
+          <div className="ack-modal-container">
+            {/* Volet gauche (Alerte / Rouge Incendie) */}
+            <div className="ack-left-panel">
+              <div className="ack-left-header">
+                <h3>{selectedAlert.location.site.toUpperCase()} — {selectedAlert.location.salle.toUpperCase()}</h3>
+                <span className="ack-left-subtitle">{selectedAlert.location.batiment.replace('batiment_', 'Bâtiment ')}</span>
+              </div>
+              
+              <div className="ack-left-alert-values">
+                <span className="ack-big-value font-mono">
+                  {selectedAlert.readings.smoke_level} ppm
+                </span>
+                <span className="ack-big-value font-mono" style={{ fontSize: '1.8rem', marginTop: '0.5rem' }}>
+                  {selectedAlert.readings.temperature} °C
+                </span>
+              </div>
+
+              <div className="ack-left-details">
+                <div className="ack-details-row">
+                  <span className="ack-detail-lbl">Alerte active depuis :</span>
+                  <span className="ack-detail-val font-mono">{formatAlertDuration(alertTimers[selectedAlert.dev_eui])}</span>
+                </div>
+                <div className="ack-details-row">
+                  <span className="ack-detail-lbl">Date du déclenchement :</span>
+                  <span className="ack-detail-val font-mono">{alertTriggers[selectedAlert.dev_eui]?.timestamp || 'N/A'}</span>
+                </div>
+                <div className="ack-details-row">
+                  <span className="ack-detail-lbl">Type d'alerte :</span>
+                  <span className="ack-detail-val">Dépassement du seuil critique</span>
+                </div>
+                <div className="ack-details-row">
+                  <span className="ack-detail-lbl">Valeur seuil critique :</span>
+                  <span className="ack-detail-val font-mono">50 ppm / 60 °C</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Volet droit (Formulaire d'acquittement) */}
+            <div className="ack-right-panel">
+              <h2 className="ack-right-title">Informations alerte</h2>
+              
+              {/* 1. Motif de l'alerte */}
+              <div className="form-section">
+                <h4 className="section-label">Motif de l'alerte <span className="required">*</span></h4>
+                <div className="checkbox-grid">
+                  {[
+                    "Surchauffe machine / Surcharge",
+                    "Fausse alerte (poussière/vapeur)",
+                    "Exercice de sécurité / Test",
+                    "Court-circuit / Problème électrique",
+                    "Dysfonctionnement capteur",
+                    "Porte ou enceinte mal isolée"
+                  ].map(motif => (
+                    <label key={motif} className="checkbox-label">
+                      <input 
+                        type="checkbox" 
+                        checked={tempMotifs.includes(motif)}
+                        onChange={(e) => {
+                          if (e.target.checked) setTempMotifs([...tempMotifs, motif]);
+                          else setTempMotifs(tempMotifs.filter(m => m !== motif));
+                        }}
+                      />
+                      <span>{motif}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. Action menée */}
+              <div className="form-section">
+                <h4 className="section-label">Action <span className="required">*</span></h4>
+                <div className="checkbox-grid">
+                  {[
+                    "Appel des secours (18/112)",
+                    "Ventilation forcée de la salle",
+                    "Évacuation de la zone concernée",
+                    "Coupure d'urgence de l'alimentation",
+                    "Aucune anomalie constatée",
+                    "Intervention équipe technique"
+                  ].map(action => (
+                    <label key={action} className="checkbox-label">
+                      <input 
+                        type="checkbox" 
+                        checked={tempActions.includes(action)}
+                        onChange={(e) => {
+                          if (e.target.checked) setTempActions([...tempActions, action]);
+                          else setTempActions(tempActions.filter(a => a !== action));
+                        }}
+                      />
+                      <span>{action}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3. Impact */}
+              <div className="form-section">
+                <h4 className="section-label">Impact <span className="required">*</span></h4>
+                <div className="radio-group-row">
+                  {["Aucun", "Mineur", "Majeur"].map(impact => (
+                    <label key={impact} className="radio-label">
+                      <input 
+                        type="radio" 
+                        name="impact" 
+                        value={impact}
+                        checked={tempImpact === impact}
+                        onChange={() => setTempImpact(impact)}
+                      />
+                      <span>{impact}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* 4. Commentaires */}
+              <div className="form-section">
+                <h4 className="section-label">Commentaires ou autres précisions</h4>
+                <textarea 
+                  className="form-textarea"
+                  placeholder="Saisissez des détails additionnels sur l'intervention ici..."
+                  value={tempComment}
+                  onChange={(e) => setTempComment(e.target.value)}
+                />
+              </div>
+
+              {/* Pied de formulaire */}
+              <div className="ack-form-footer">
+                <button className="btn-cancel" onClick={() => setSelectedAlert(null)}>Annuler</button>
+                <button 
+                  className="btn-save-ack" 
+                  onClick={handleSaveAcknowledge}
+                  disabled={tempMotifs.length === 0 && tempActions.length === 0}
+                >
+                  Enregistrer l'acquittement
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
