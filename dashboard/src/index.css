@@ -1,19 +1,20 @@
 :root {
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-sans: 'Fira Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
   
-  /* Color Palette - Premium Dark Cyberpunk Theme */
-  --bg-main: #0a0b10;
-  --bg-card: rgba(18, 20, 32, 0.7);
-  --bg-card-hover: rgba(26, 29, 46, 0.85);
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-focus: rgba(168, 85, 247, 0.4);
+  /* Color Palette - Slate & Emerald Premium Dark Theme */
+  --bg-main: #0f172a;
+  --bg-card: rgba(30, 41, 59, 0.45);
+  --bg-card-hover: rgba(30, 41, 59, 0.65);
+  --border-subtle: rgba(71, 85, 105, 0.15);
+  --border-focus: rgba(34, 197, 94, 0.4);
   
-  --text-primary: #f3f4f6;
-  --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
   
-  --clr-primary: #a855f7; /* Purple */
-  --clr-success: #10b981; /* Emerald Green */
+  --clr-primary: #22c55e; /* Success Green as primary action */
+  --clr-success: #22c55e; /* Emerald Green */
   --clr-warning: #f59e0b; /* Amber Orange */
   --clr-danger: #ef4444;  /* Red */
   --clr-info: #3b82f6;    /* Blue */
@@ -36,8 +37,8 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   background-image: 
-    radial-gradient(at 0% 0%, rgba(168, 85, 247, 0.15) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(59, 130, 246, 0.1) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(30, 41, 59, 0.3) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(34, 197, 94, 0.05) 0px, transparent 50%);
   background-attachment: fixed;
 }
 
@@ -110,4 +111,8 @@ body {
 .indicator-dot.inactive {
   background-color: var(--clr-danger);
   box-shadow: 0 0 10px var(--clr-danger);
+}
+
+.font-mono {
+  font-family: var(--font-mono), monospace;
 }
