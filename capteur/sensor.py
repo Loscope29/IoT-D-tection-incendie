@@ -88,7 +88,7 @@ class FireSensor:
         self._client = mqtt.Client(client_id=f"sensor-{self.dev_eui}")
         if HIVEMQ_USER and HIVEMQ_PASSWORD:
             self._client.username_pw_set(HIVEMQ_USER, HIVEMQ_PASSWORD)
-        if CHIRPSTACK_PORT == 8883 or not ("localhost" in CHIRPSTACK_HOST or "127.0.0.1" in CHIRPSTACK_HOST):
+        if CHIRPSTACK_PORT == 8883 or (CHIRPSTACK_PORT != 1883 and not ("localhost" in CHIRPSTACK_HOST or "127.0.0.1" in CHIRPSTACK_HOST or "hivemq" in CHIRPSTACK_HOST)):
             self._client.tls_set()
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
@@ -230,7 +230,16 @@ class FireSensor:
             f"{'='*60}"
         )
 
-        self._client.connect(CHIRPSTACK_HOST, CHIRPSTACK_PORT, keepalive=60)
+        connected = False
+        while not connected:
+            try:
+                log.info(f"[{self.dev_eui}] Tentative de connexion au broker MQTT {CHIRPSTACK_HOST}:{CHIRPSTACK_PORT}...")
+                self._client.connect(CHIRPSTACK_HOST, CHIRPSTACK_PORT, keepalive=60)
+                connected = True
+            except Exception as e:
+                log.warning(f"[{self.dev_eui}] Impossible de se connecter au broker ({e}). Nouvelle tentative dans 5 secondes...")
+                time.sleep(5)
+                
         self._client.loop_start()
 
         time.sleep(1)

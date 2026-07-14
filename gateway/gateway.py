@@ -118,7 +118,7 @@ class FireGateway:
         self._client = mqtt.Client(client_id="fire-gateway")
         if HIVEMQ_USER and HIVEMQ_PASS:
             self._client.username_pw_set(HIVEMQ_USER, HIVEMQ_PASS)
-        if HIVEMQ_PORT == 8883 or not ("localhost" in HIVEMQ_HOST or "127.0.0.1" in HIVEMQ_HOST):
+        if HIVEMQ_PORT == 8883 or (HIVEMQ_PORT != 1883 and not ("localhost" in HIVEMQ_HOST or "127.0.0.1" in HIVEMQ_HOST or "hivemq" in HIVEMQ_HOST)):
             self._client.tls_set()
         self._client.on_connect    = self._on_connect
         self._client.on_message    = self._on_message
@@ -295,7 +295,16 @@ class FireGateway:
             f"{'='*60}"
         )
 
-        self._client.connect(HIVEMQ_HOST, HIVEMQ_PORT, keepalive=60)
+        connected = False
+        while not connected:
+            try:
+                log.info(f"Tentative de connexion au broker MQTT {HIVEMQ_HOST}:{HIVEMQ_PORT}...")
+                self._client.connect(HIVEMQ_HOST, HIVEMQ_PORT, keepalive=60)
+                connected = True
+            except Exception as e:
+                log.warning(f"Impossible de se connecter au broker ({e}). Nouvelle tentative dans 5 secondes...")
+                time.sleep(5)
+                
         self._client.loop_start()
 
         try:

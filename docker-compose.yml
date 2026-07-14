@@ -7,11 +7,6 @@ services:
       - "1883:1883"
       - "8085:8080"
       - "8000:8000"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"] 
-      interval: 10s
-      timeout: 5s
-      retries: 10
     volumes:
       - ./hivemq/config/config.xml:/opt/hivemq/conf/config.xml
     environment:
@@ -62,7 +57,7 @@ services:
       redis:
         condition: service_healthy
       hivemq:
-        condition: service_healthy
+        condition: service_started
     ports:
       - "8095:8000"
     volumes:
@@ -90,7 +85,7 @@ services:
     restart: unless-stopped
     depends_on:
       hivemq:
-        condition: service_healthy
+        condition: service_started
     ports:
     - "1700:1700/udp"
     volumes:
@@ -196,6 +191,103 @@ services:
     volumes:
       - influxdb-data:/var/lib/influxdb2
       - influxdb-config:/etc/influxdb2
+    networks:
+      - fire-net
+
+  simulated-sensors:
+    build:
+      context: ./capteur
+    container_name: simulated-sensors
+    restart: unless-stopped
+    environment:
+      - VITE_HIVEMQ_HOST=hivemq
+      - VITE_HIVEMQ_PORT=1883
+    depends_on:
+      hivemq:
+        condition: service_started
+    networks:
+      - fire-net
+
+  gateway-parser:
+    build:
+      context: ./gateway
+    container_name: gateway-parser
+    restart: unless-stopped
+    command: python gateway.py
+    environment:
+      - VITE_HIVEMQ_HOST=hivemq
+      - VITE_HIVEMQ_PORT=1883
+    depends_on:
+      hivemq:
+        condition: service_started
+    networks:
+      - fire-net
+
+  mqtt-to-kafka:
+    build:
+      context: ./kafka
+    container_name: mqtt-to-kafka
+    restart: unless-stopped
+    environment:
+      - VITE_HIVEMQ_HOST=hivemq
+      - VITE_HIVEMQ_PORT=1883
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    depends_on:
+      hivemq:
+        condition: service_started
+      kafka:
+        condition: service_started
+    networks:
+      - fire-net
+
+  backend:
+    build:
+      context: ./backend
+    container_name: fire-backend
+    restart: unless-stopped
+    command: sh -c "python manage.py migrate && python manage.py setup_kafka && python manage.py runserver 0.0.0.0:8002"
+    ports:
+      - "8002:8002"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      kafka:
+        condition: service_started
+    networks:
+      - fire-net
+
+  assistant-worker:
+    build:
+      context: ./backend
+    container_name: fire-assistant-worker
+    restart: unless-stopped
+    command: python manage.py run_assistant_worker
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - LLM_API_URL=http://host.docker.internal:8000/v1/chat/completions
+      - LLM_MODEL=llama3  # Remplacez par le nom exact de votre modele charge dans vLLM
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      backend:
+        condition: service_started
+    networks:
+      - fire-net
+
+
+  dashboard:
+    build:
+      context: ./dashboard
+    container_name: fire-dashboard
+    restart: unless-stopped
+    ports:
+      - "8088:80"
     networks:
       - fire-net
 

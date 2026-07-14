@@ -17,9 +17,16 @@ import {
   Search,
   Clock,
   ShieldCheck,
-  EyeOff
+  EyeOff,
+  Sparkles,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  ThumbsUp,
+  ThumbsDown
 } from 'lucide-react';
 import './App.css';
+
 
 // Liste statique des capteurs attendus pour pré-remplir l'interface
 const INITIAL_SENSORS = {
@@ -54,16 +61,23 @@ function App() {
     { time: new Date().toLocaleTimeString(), msg: "Système de supervision initialisé.", type: "system" }
   ]);
   
-  // Nouveaux états de navigation, d'acquittement et de style (Style Hôpital William Morey)
-  const [activeTab, setActiveTab] = useState('supervision'); // 'supervision', 'rooms', 'journal'
+  // Nouveaux états de navigation, d'acquittement et de style 
+  const [activeTab, setActiveTab] = useState('darius'); // 'darius' par défaut, 'supervision', 'rooms', 'journal'
   const [searchQuery, setSearchQuery] = useState('');
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false); // Forcé en mode clair
   const [acknowledgedAlerts, setAcknowledgedAlerts] = useState({}); // dev_eui -> details
   const [inhibitedSensors, setInhibitedSensors] = useState({}); // dev_eui -> boolean
   const [selectedAlert, setSelectedAlert] = useState(null); // sensor object
   const [activeAlertPanelType, setActiveAlertPanelType] = useState('fire'); // 'fire' or 'technical'
   const [alertTimers, setAlertTimers] = useState({}); // dev_eui -> seconds elapsed
   const [alertTriggers, setAlertTriggers] = useState({}); // dev_eui -> { timestamp, smoke_level, temperature }
+
+  // États pour l'Assistant IA (Darius IA)
+  const [aiData, setAiData] = useState(null);
+  const [loadingAi, setLoadingAi] = useState(false);
+  const [errorAi, setErrorAi] = useState(null);
+  const [triggeringAi, setTriggeringAi] = useState(false);
+  const [isReportExpanded, setIsReportExpanded] = useState(true);
   const [lastSeen, setLastSeen] = useState(() => {
     const initial = {};
     Object.keys(INITIAL_SENSORS).forEach(eui => {
@@ -82,7 +96,7 @@ function App() {
 
   useEffect(() => {
     // Connexion au broker MQTT HiveMQ via WebSockets
-    const host = import.meta.env.VITE_HIVEMQ_HOST || 'localhost';
+    const host = import.meta.env.VITE_HIVEMQ_HOST || window.location.hostname || 'localhost';
     const wsPort = import.meta.env.VITE_HIVEMQ_WS_PORT || '8000';
     const username = import.meta.env.VITE_HIVEMQ_USER;
     const password = import.meta.env.VITE_HIVEMQ_PASSWORD;
@@ -270,13 +284,89 @@ function App() {
           }));
           
           const { site, batiment, salle } = sensor.location;
-          logMessage(`⚠️ Liaison perdue avec ${site.toUpperCase()}/${batiment}/${salle} (Équipement hors-ligne / arraché)`, "alert");
+          logMessage(` Liaison perdue avec ${site.toUpperCase()}/${batiment}/${salle} (Équipement hors-ligne / arraché)`, "alert");
         }
       });
     }, 5000);
     
     return () => clearInterval(watchdog);
   }, [lastSeen, sensors]);
+
+  // Récupérer les rapports de l'Assistant IA
+  const fetchAiData = async () => {
+    setLoadingAi(true);
+    setErrorAi(null);
+    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002';
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/assistant/dashboard/`);
+      if (!response.ok) {
+        throw new Error(`Erreur serveur (${response.status})`);
+      }
+      const data = await response.json();
+      setAiData(data);
+    } catch (err) {
+      setErrorAi(err.message);
+    } finally {
+      setLoadingAi(false);
+    }
+  };
+
+  // Forcer manuellement la compilation de l'IA
+  const triggerAiCompilation = async () => {
+    setTriggeringAi(true);
+    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002';
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/assistant/trigger/`, {
+        method: 'POST'
+      });
+      if (!response.ok) {
+        throw new Error(`Erreur de compilation (${response.status})`);
+      }
+      logMessage("🤖 Assistant IA : Analyse manuelle des événements terminée.", "system");
+      await fetchAiData();
+    } catch (err) {
+      logMessage(`❌ Échec de la compilation IA : ${err.message}`, "alert");
+    } finally {
+      setTriggeringAi(false);
+    }
+  };
+
+  // Parser simple du Markdown en HTML pour l'affichage de la synthèse
+  const customMarkdownParser = (text) => {
+    if (!text) return "";
+    let html = text;
+    
+    // Échapper les balises HTML de base pour la sécurité
+    html = html
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    
+    // Titres (### Titre)
+    html = html.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^#### (.*?)$/gm, '<h4>$1</h4>');
+    
+    // Gras (**texte**)
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    
+    // Puces (- point)
+    html = html.replace(/^- (.*?)$/gm, '<li>$1</li>');
+    
+    // Retours à la ligne
+    html = html.replace(/\n/g, '<br/>');
+    
+    // Nettoyer les sauts de ligne superflus après les puces
+    html = html.replace(/(<li>.*?<\/li>)<br\/>/g, '$1');
+    
+    return html;
+  };
+
+  // Charger automatiquement les données IA lorsque l'onglet devient actif
+  useEffect(() => {
+    if (activeTab === 'darius') {
+      fetchAiData();
+    }
+  }, [activeTab]);
 
   // Publier une commande manuelle vers la gateway
   const sendCommand = (sensor, action, value) => {
@@ -293,34 +383,80 @@ function App() {
   };
 
   // Enregistrer l'acquittement de l'alerte
-  const handleSaveAcknowledge = () => {
+  const handleSaveAcknowledge = async () => {
     if (!selectedAlert) return;
     const dev_eui = selectedAlert.dev_eui;
     const { site, batiment, salle } = selectedAlert.location;
 
-    setAcknowledgedAlerts(prev => ({
-      ...prev,
-      [dev_eui]: {
-        type: activeAlertPanelType,
-        motifs: tempMotifs,
-        actions: tempActions,
-        impact: tempImpact,
-        comment: tempComment,
-        timestamp: new Date().toLocaleTimeString(),
-        duration: alertTimers[dev_eui] || 0
+    const payload = {
+      dev_eui,
+      location: {
+        site: selectedAlert.location.site,
+        batiment: selectedAlert.location.batiment,
+        salle: selectedAlert.location.salle,
+        machine: selectedAlert.location.machine || ""
+      },
+      motifs: tempMotifs,
+      actions: tempActions,
+      impact: tempImpact,
+      comment: tempComment || "",
+      duration: alertTimers[dev_eui] || 0,
+      timestamp: new Date().toLocaleTimeString()
+    };
+
+    const endpoint = activeAlertPanelType === 'fire' 
+      ? 'api/acquittement/incendie/' 
+      : 'api/acquittement/technique/';
+      
+    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002';
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMsg = errorData.non_field_errors 
+          ? errorData.non_field_errors.join(', ') 
+          : JSON.stringify(errorData);
+        throw new Error(errorMsg || `Erreur serveur (${response.status})`);
       }
-    }));
 
-    const logPrefix = activeAlertPanelType === 'fire' ? '[Acquittement]' : '[Intervention Technique]';
-    const logText = `${logPrefix} ${site.toUpperCase()}/${batiment}/${salle} traité - Motif: ${tempMotifs.join(', ') || 'Non spécifié'} | Action: ${tempActions.join(', ') || 'Aucune'} | Impact: ${tempImpact}`;
-    logMessage(logText, "success");
+      const responseData = await response.json();
+      const kafkaStatus = responseData.kafka_published ? 'transmis à Kafka' : 'non transmis à Kafka';
+      
+      setAcknowledgedAlerts(prev => ({
+        ...prev,
+        [dev_eui]: {
+          type: activeAlertPanelType,
+          motifs: tempMotifs,
+          actions: tempActions,
+          impact: tempImpact,
+          comment: tempComment,
+          timestamp: new Date().toLocaleTimeString(),
+          duration: alertTimers[dev_eui] || 0
+        }
+      }));
 
-    // Fermer le volet et réinitialiser le formulaire
-    setSelectedAlert(null);
-    setTempMotifs([]);
-    setTempActions([]);
-    setTempImpact('Aucun');
-    setTempComment('');
+      const logPrefix = activeAlertPanelType === 'fire' ? '[Acquittement]' : '[Intervention Technique]';
+      const logText = `${logPrefix} ${site.toUpperCase()}/${batiment}/${salle} traité (${kafkaStatus}) - Motif: ${tempMotifs.join(', ') || 'Non spécifié'} | Action: ${tempActions.join(', ') || 'Aucune'} | Impact: ${tempImpact}`;
+      logMessage(logText, "success");
+
+      // Fermer le volet et réinitialiser le formulaire
+      setSelectedAlert(null);
+      setTempMotifs([]);
+      setTempActions([]);
+      setTempImpact('Aucun');
+      setTempComment('');
+    } catch (error) {
+      console.error("Erreur lors de l'enregistrement de l'acquittement :", error);
+      logMessage(`[Erreur Acquittement] Échec de l'envoi : ${error.message}`, "alert");
+    }
   };
 
   // Activer le volet d'acquittement pour un capteur spécifique
@@ -427,6 +563,13 @@ function App() {
         {/* Onglets de navigation */}
         <nav className="header-tabs">
           <button 
+            className={`tab-btn ${activeTab === 'darius' ? 'tab-btn-active' : ''}`}
+            onClick={() => setActiveTab('darius')}
+          >
+            <Sparkles size={16} />
+            <span>Darius IA</span>
+          </button>
+          <button 
             className={`tab-btn ${activeTab === 'supervision' ? 'tab-btn-active' : ''}`}
             onClick={() => setActiveTab('supervision')}
           >
@@ -450,21 +593,12 @@ function App() {
         </nav>
 
         <div className="header-right">
-          {/* Commutateur de thème */}
-          <button 
-            className="theme-toggle-btn"
-            onClick={() => setIsDarkMode(!isDarkMode)}
-            title={isDarkMode ? "Passer en mode clair (Hôpital)" : "Passer en mode sombre (OLED)"}
-          >
-            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-
           {/* Statut de connexion */}
           <div className="connection-status">
             {mqttConnected ? (
               <>
                 <Wifi size={16} className="text-success" />
-                <span className="text-success font-mono">HiveMQ WS</span>
+                <span className="text-success font-mono"> WS</span>
               </>
             ) : (
               <>
@@ -476,43 +610,45 @@ function App() {
         </div>
       </header>
 
-      {/* METRICS SUMMARY BAR (Style CH William Morey) */}
-      <section className="metrics-summary-bar">
-        {/* 1. Alertes en cours */}
-        <div className={`metric-card card-solid-red ${activeFireAlerts.length > 0 ? 'pulse-danger' : ''}`}>
-          <div className="metric-header">Alertes en cours</div>
-          <div className="metric-value font-mono">{activeFireAlerts.length}</div>
-          <div className="metric-sub">Équipements</div>
-        </div>
+      {/* METRICS SUMMARY BAR  */}
+      {activeTab !== 'darius' && (
+        <section className="metrics-summary-bar">
+          {/* 1. Alertes en cours */}
+          <div className={`metric-card card-solid-red ${activeFireAlerts.length > 0 ? 'pulse-danger' : ''}`}>
+            <div className="metric-header">Alertes en cours</div>
+            <div className="metric-value font-mono">{activeFireAlerts.length}</div>
+            <div className="metric-sub">Équipements</div>
+          </div>
 
-        {/* 2. Alertes non traitées */}
-        <div className={`metric-card card-border-red ${untreatedAlerts.length > 0 ? 'pulse-border' : ''}`}>
-          <div className="metric-header text-danger">Alertes non traitées</div>
-          <div className="metric-value font-mono text-danger">{untreatedAlerts.length}</div>
-          <div className="metric-sub text-muted">Équipements</div>
-        </div>
+          {/* 2. Alertes non traitées */}
+          <div className={`metric-card card-border-red ${untreatedAlerts.length > 0 ? 'pulse-border' : ''}`}>
+            <div className="metric-header text-danger">Alertes non traitées</div>
+            <div className="metric-value font-mono text-danger">{untreatedAlerts.length}</div>
+            <div className="metric-sub text-muted">Équipements</div>
+          </div>
 
-        {/* 3. Équipements déconnectés */}
-        <div className="metric-card card-solid-grey">
-          <div className="metric-header">Équipement déconnecté</div>
-          <div className="metric-value font-mono">{disconnectedAlerts.length}</div>
-          <div className="metric-sub text-muted">Équipements</div>
-        </div>
+          {/* 3. Équipements déconnectés */}
+          <div className="metric-card card-solid-grey">
+            <div className="metric-header">Équipement déconnecté</div>
+            <div className="metric-value font-mono">{disconnectedAlerts.length}</div>
+            <div className="metric-sub text-muted">Équipements</div>
+          </div>
 
-        {/* 4. Équipements inhibés */}
-        <div className="metric-card card-border-yellow">
-          <div className="metric-header text-warning">Équipement inhibé</div>
-          <div className="metric-value font-mono text-warning">{inhibitedCount}</div>
-          <div className="metric-sub text-muted">Équipements</div>
-        </div>
+          {/* 4. Équipements inhibés */}
+          <div className="metric-card card-border-yellow">
+            <div className="metric-header text-warning">Équipement inhibé</div>
+            <div className="metric-value font-mono text-warning">{inhibitedCount}</div>
+            <div className="metric-sub text-muted">Équipements</div>
+          </div>
 
-        {/* 5. Équipements en préalarme */}
-        <div className="metric-card card-border-orange">
-          <div className="metric-header text-orange">Équipement en préalarme</div>
-          <div className="metric-value font-mono text-orange">{prealarmAlerts.length}</div>
-          <div className="metric-sub text-muted">Équipements</div>
-        </div>
-      </section>
+          {/* 5. Équipements en préalarme */}
+          <div className="metric-card card-border-orange">
+            <div className="metric-header text-orange">Équipement en préalarme</div>
+            <div className="metric-value font-mono text-orange">{prealarmAlerts.length}</div>
+            <div className="metric-sub text-muted">Équipements</div>
+          </div>
+        </section>
+      )}
 
       {/* RENDER PRINCIPAL DE LA VUE ACTIVE */}
       <main className="dashboard-main-content">
@@ -857,7 +993,7 @@ function App() {
           </div>
         )}
 
-        {/* TAB 2 : ÉTAT DES SALLES (Grille dynamique style Hôpital William Morey) */}
+        {/* TAB 2 : ÉTAT DES SALLES  */}
         {activeTab === 'rooms' && (
           <section className="rooms-grid-tab">
             <div className="search-bar-container">
@@ -1062,9 +1198,105 @@ function App() {
           </section>
         )}
 
+        {/* TAB 4 : DARIUS IA */}
+        {activeTab === 'darius' && (
+          <section className="darius-ia-tab">
+            <div className="darius-recap-container">
+              <div className="darius-recap-header">
+                <div className="darius-recap-header-left">
+                  <h2 className="darius-title">Assistant IA Incendie</h2>
+                  <p className="darius-recap-subtitle">
+                    {aiData ? (
+                      `${(aiData.latest_periodic ? 1 : 0) + (aiData.latest_weekly ? 1 : 0) + (aiData.latest_monthly ? 1 : 0)} synthèses prêtes à l'analyse.`
+                    ) : "Chargement des synthèses..."}
+                  </p>
+                </div>
+                <div className="darius-recap-header-right">
+                  <button 
+                    className={`btn-ai-trigger ${triggeringAi || loadingAi ? 'ai-spinning' : ''}`}
+                    onClick={triggerAiCompilation}
+                    disabled={triggeringAi || loadingAi}
+                    title="Déclencher une compilation manuelle"
+                  >
+                    <RefreshCw size={16} />
+                    <span>Analyser les nouveaux événements</span>
+                  </button>
+                </div>
+              </div>
+
+              {errorAi && (
+                <div className="ai-error-banner">
+                  <ShieldAlert size={18} />
+                  <span>Impossible de charger les données de l'Assistant IA : {errorAi}</span>
+                  <button onClick={fetchAiData} className="btn-ai-retry">Réessayer</button>
+                </div>
+              )}
+
+              {loadingAi && !aiData && (
+                <div className="ai-loading-container">
+                  <div className="ai-spinner-icon animate-spin"></div>
+                  <p>Analyse et structuration des rapports en cours...</p>
+                </div>
+              )}
+
+              {aiData && (
+                <div className="slack-cards-container">
+                  {aiData.active_report ? (
+                    <div className="slack-recap-card">
+                      <div className="slack-card-header">
+                        <div className="slack-header-left">
+                          <Sparkles size={16} className="slack-sparkle-icon" />
+                          <span className="slack-channel-name">{aiData.active_report.title}</span>
+                          <span className="slack-card-date">
+                            {aiData.active_report.subtitle}
+                          </span>
+                        </div>
+                        <button 
+                          className="slack-expand-btn"
+                          onClick={() => setIsReportExpanded(prev => !prev)}
+                        >
+                          {isReportExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        </button>
+                      </div>
+
+                      {isReportExpanded && (
+                        <div className="slack-card-body">
+                          <h4 className="slack-body-title">Analyse de la situation</h4>
+                          <div 
+                            className="slack-markdown-content"
+                            dangerouslySetInnerHTML={{ __html: customMarkdownParser(aiData.active_report.content) }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="slack-recap-empty-card">
+                      <Sparkles size={24} className="text-muted" />
+                      <h4>Aucun rapport disponible</h4>
+                      <p>Aucun événement ou rapport n'a été généré. Cliquez sur "Analyser les nouveaux événements" pour lancer une compilation.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
       </main>
 
-      {/* OVERLAY D'ACQUITTEMENT D'ALERTE (Style Hôpital William Morey) */}
+      {/* Bouton flottant Darius IA */}
+      <button 
+        className={`darius-ia-fab ${activeTab === 'darius' ? 'fab-active' : ''}`}
+        onClick={() => setActiveTab('darius')}
+        title="Accéder à Darius IA"
+      >
+        <Sparkles size={22} className="fab-icon" />
+        <span className={`fab-badge ${aiData?.active_report ? 'badge-available' : 'badge-unavailable'}`}>
+          {aiData?.active_report ? "1" : "0"}
+        </span>
+      </button>
+
+      {/* OVERLAY D'ACQUITTEMENT D'ALERTE  */}
       {selectedAlert && (() => {
         const motifsOptions = activeAlertPanelType === 'fire' ? [
           "Surchauffe machine / Surcharge",
@@ -1124,7 +1356,7 @@ function App() {
                         {selectedAlert.readings.status === 'inactive' ? 'HORS-LIGNE' : 'BATTERIE'}
                       </span>
                       <span className="ack-big-value font-mono" style={{ fontSize: '1.8rem', marginTop: '0.5rem' }}>
-                        {selectedAlert.readings.status === 'inactive' ? '⚠️ Liaison perdue' : `🔋 ${selectedAlert.readings.battery_level}%`}
+                        {selectedAlert.readings.status === 'inactive' ? ' Liaison perdue' : `🔋 ${selectedAlert.readings.battery_level}%`}
                       </span>
                     </>
                   )}

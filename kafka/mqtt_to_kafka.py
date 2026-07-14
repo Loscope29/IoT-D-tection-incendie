@@ -50,7 +50,7 @@ MQTT_USER = os.environ.get("VITE_HIVEMQ_USER")
 MQTT_PASS = os.environ.get("VITE_HIVEMQ_PASSWORD")
 MQTT_TOPIC_SUB = "fire/#"
 
-KAFKA_BOOTSTRAP_SERVERS = ["localhost:29092"]
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:29092").split(",")
 
 # Initialisation du producteur Kafka avec reconnexion automatique
 producer = None
@@ -142,7 +142,7 @@ def on_message(client, userdata, msg):
 mqtt_client = mqtt.Client(client_id="hivemq-to-kafka-bridge")
 if MQTT_USER and MQTT_PASS:
     mqtt_client.username_pw_set(MQTT_USER, MQTT_PASS)
-if MQTT_PORT == 8883 or not ("localhost" in MQTT_HOST or "127.0.0.1" in MQTT_HOST):
+if MQTT_PORT == 8883 or (MQTT_PORT != 1883 and not ("localhost" in MQTT_HOST or "127.0.0.1" in MQTT_HOST or "hivemq" in MQTT_HOST)):
     mqtt_client.tls_set()
 mqtt_client.on_connect = on_connect
 mqtt_client.on_disconnect = on_disconnect
@@ -150,7 +150,14 @@ mqtt_client.on_message = on_message
 
 try:
     log.info(f"Connexion à HiveMQ...")
-    mqtt_client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
+    connected = False
+    while not connected:
+        try:
+            mqtt_client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
+            connected = True
+        except Exception as e:
+            log.warning(f"Impossible de se connecter au broker ({e}). Nouvelle tentative dans 5 secondes...")
+            time.sleep(5)
     mqtt_client.loop_forever()
 except KeyboardInterrupt:
     log.info("Arrêt du pont MQTT -> Kafka demandé.")
